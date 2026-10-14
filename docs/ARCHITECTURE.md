@@ -33,7 +33,8 @@ CLI(`boopang/cli.py`)와 웹(`boopang/web/app.py`)이 이를 공유한다.
 | inspector.py | 형 변환 + 검수 이슈 생성 |
 | pricing.py | 금액 계산 |
 | status.py | 상태 분류 및 주문 롤업 |
-| exporter.py | 물류 DB 연동 포맷 출력, 수식 인젝션 방어 |
+| schema.py | WMS 출력 스키마(schema_config.json) 로드·검증 |
+| exporter.py | 내부 표준 레코드 → 스키마 매핑 후 CSV/JSON/XLSX 출력, 수식 인젝션 방어 |
 | web/app.py | FastAPI (무상태, 보안 헤더) |
 
 ## 물류 DB(WMS) 라인 스키마 (CSV)
