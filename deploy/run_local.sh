@@ -6,4 +6,5 @@ cd "$(dirname "$0")/.."
 . .venv/bin/activate
 pip install -q -r requirements-dev.txt
 python -m pytest -q
-exec uvicorn boopang.web.app:app --host 127.0.0.1 --port "${PORT:-8000}"
+echo "관제 대시보드: http://127.0.0.1:${PORT:-8899}/"
+exec uvicorn boopang.web.app:app --host 127.0.0.1 --port "${PORT:-8899}"

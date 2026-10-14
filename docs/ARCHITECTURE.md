@@ -35,7 +35,9 @@ CLI(`boopang/cli.py`)와 웹(`boopang/web/app.py`)이 이를 공유한다.
 | status.py | 상태 분류 및 주문 롤업 |
 | schema.py | WMS 출력 스키마(schema_config.json) 로드·검증 |
 | exporter.py | 내부 표준 레코드 → 스키마 매핑 후 CSV/JSON/XLSX 출력, 수식 인젝션 방어 |
-| web/app.py | FastAPI (무상태, 보안 헤더) |
+| web/app.py | FastAPI (보안 헤더, 변환 API, 잡 API) |
+| web/jobs.py | 관제 대시보드: 잡 매니저(TTL 30분, 동시 3건)와 12단계 에이전트 파이프라인 실행기, SSE 이벤트 |
+| web/static/dashboard.* | 관제 UI (에이전트 카드, 로그 터미널, 다운로드) — 기본 포트 8899 |
 
 ## 물류 DB(WMS) 라인 스키마 (CSV)
 `ORDER_NO, LINE_NO, SKU, ITEM_NAME, ORD_QTY, RCV_QTY, UNIT_PRICE, DISC_RATE, SUPPLY_AMT, VAT_AMT, TOTAL_AMT, STATUS_CD, RECIPIENT, TEL, ADDR, SHIP_DT, TRACKING_NO, ISSUE_CNT`

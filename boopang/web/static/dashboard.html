@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>부팡 멀티 에이전트 관제</title>
+<link rel="stylesheet" href="/static/dashboard.css">
+</head>
+<body>
+<header class="top">
+  <h1>🛰️ 부팡 멀티 에이전트 관제 센터</h1>
+  <nav><a href="/api/sample">샘플 파일</a><a href="/converter">표 미리보기 변환기</a><a href="/api/docs">API 문서</a></nav>
+</header>
+
+<main>
+  <section class="panel" aria-labelledby="h-job">
+    <h2 id="h-job">업무 지시</h2>
+    <form id="job-form">
+      <label class="field">
+        <span>업무 지시 / 메모 <small>(처리 리포트와 로그에 기록됩니다. AI가 해석하지는 않습니다)</small></span>
+        <textarea id="instruction" name="instruction" rows="2" maxlength="1000"
+                  placeholder="예) 10월 2주차 입고분 검수 후 WMS 업로드용으로 변환"></textarea>
+      </label>
+      <div id="drop" class="drop" tabindex="0" role="button" aria-label="엑셀 또는 CSV 파일 선택">
+        <strong id="drop-label">패킹리스트/주문 파일(.xlsx, .csv)을 끌어놓거나 클릭하세요</strong>
+        <small>최대 5MB · 20,000행</small>
+        <input id="file" name="file" type="file" accept=".xlsx,.csv" hidden>
+      </div>
+      <div class="row">
+        <button id="start" type="submit" disabled>에이전트 팀 가동 ▶</button>
+        <span id="form-msg" role="status"></span>
+      </div>
+    </form>
+  </section>
+
+  <section class="panel monitor" aria-live="polite">
+    <div class="mon-head">🟢 AGENT STATUS LIVE MONITOR</div>
+    <dl>
+      <dt>현재 활성 에이전트</dt><dd id="mon-agent">—</dd>
+      <dt>진행 중인 태스크</dt><dd id="mon-task">대기 중</dd>
+      <dt>루프 카운터</dt><dd id="mon-loop">0 / 3</dd>
+    </dl>
+    <div class="progress" aria-label="전체 진행률"><div id="bar" class="bar"></div></div>
+    <small id="progress-text">0 / 12 에이전트 완료</small>
+  </section>
+
+  <section aria-labelledby="h-agents">
+    <h2 id="h-agents" class="sr">에이전트 상태</h2>
+    <div id="agents" class="agents"></div>
+  </section>
+
+  <section class="panel">
+    <div class="term-head">
+      <h2>실시간 수행 로그</h2>
+      <span id="conn" class="conn off">연결 안 됨</span>
+    </div>
+    <div id="term" class="term" role="log" aria-live="off" tabindex="0"></div>
+  </section>
+
+  <section id="result" class="panel" hidden>
+    <h2>변환 결과</h2>
+    <div id="cards" class="cards"></div>
+    <div class="downloads">
+      <a id="dl-csv" class="btn" download>⬇ WMS CSV</a>
+      <a id="dl-json" class="btn" download>⬇ JSON</a>
+      <a id="dl-xlsx" class="btn" download>⬇ XLSX 리포트</a>
+    </div>
+    <small class="muted">결과는 서버 메모리에 30분간만 보관되며 이후 삭제됩니다.</small>
+  </section>
+</main>
+<script src="/static/dashboard.js"></script>
+</body>
+</html>

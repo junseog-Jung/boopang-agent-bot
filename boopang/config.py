@@ -31,6 +31,19 @@ def _env_decimal(name: str, default: str) -> Decimal:
     return d
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        v = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name}: 숫자가 아닙니다 (현재 값: {raw!r})") from exc
+    if v != v or v in (float("inf"), float("-inf")):
+        raise ValueError(f"{name}: 유한한 숫자여야 합니다 (현재 값: {raw!r})")
+    return v
+
+
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
@@ -52,6 +65,7 @@ class Config:
     max_upload_bytes: int = 5 * 1024 * 1024
     max_rows: int = 20000
     schema_file: str = ""                    # 빈 값이면 내장 기본 WMS 스키마
+    step_delay: float = 0.4                  # 관제 대시보드 단계 간 연출 지연(초). 처리 결과와 무관, 0 이면 즉시
 
     def __post_init__(self):
         if not (Decimal("0") <= self.vat_rate <= Decimal("1")):
@@ -60,6 +74,8 @@ class Config:
             raise ValueError(f"BOOPANG_BILL_BASIS: {', '.join(BILL_BASES)} 중 하나여야 합니다")
         if self.free_shipping_threshold < 0 or self.shipping_fee < 0:
             raise ValueError("배송비 관련 값은 0 이상이어야 합니다")
+        if not (0 <= self.step_delay <= 5):
+            raise ValueError("BOOPANG_STEP_DELAY: 0~5 초 사이여야 합니다")
         if self.max_upload_bytes <= 0 or self.max_rows <= 0:
             raise ValueError("BOOPANG_MAX_UPLOAD_BYTES / BOOPANG_MAX_ROWS 는 1 이상이어야 합니다")
 
@@ -79,4 +95,5 @@ class Config:
             max_upload_bytes=_env_int("BOOPANG_MAX_UPLOAD_BYTES", 5 * 1024 * 1024),
             max_rows=_env_int("BOOPANG_MAX_ROWS", 20000),
             schema_file=os.environ.get("BOOPANG_SCHEMA_FILE", "").strip(),
+            step_delay=_env_float("BOOPANG_STEP_DELAY", 0.4),
         )
