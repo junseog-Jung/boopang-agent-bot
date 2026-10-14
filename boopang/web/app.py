@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -15,7 +16,8 @@ from ..models import ParseError
 from ..pipeline import process
 from ..schema import SchemaError, load_schema
 from ..sample import sample_xlsx
-from .jobs import AGENTS, JobLimitError, JobManager, run_job
+from ..factory.pipeline import make_llm, run_software_job
+from .jobs import AGENTS, SOFTWARE_ROLES, JobLimitError, JobManager, run_job
 
 STATIC = Path(__file__).parent / "static"
 ALLOWED_EXT = (".xlsx", ".csv")
@@ -129,12 +131,53 @@ async def api_convert(file: UploadFile = File(...), format: str = Query("csv")):
 
 
 # ---------------------------------------------------------------- 관제 대시보드 API
-FORMAT_NAMES = {"csv": "wms_lines.csv", "json": "wms_orders.json", "xlsx": "inspection_report.xlsx"}
+FORMAT_NAMES = {"csv": "wms_lines.csv", "json": "wms_orders.json", "xlsx": "inspection_report.xlsx", "zip": "project.zip"}
 
 
 @app.get("/api/agents")
-def api_agents():
-    return [{"key": k, "emoji": e, "name": n, "role": r} for k, e, n, r in AGENTS]
+def api_agents(mode: str = Query("logistics")):
+    software = mode == "software"
+    return [{"key": k, "emoji": e, "name": n, "role": SOFTWARE_ROLES[k] if software else r} for k, e, n, r in AGENTS]
+
+
+@app.get("/api/factory/status")
+def api_factory_status():
+    """범용 소프트웨어 팩토리 사용 가능 여부 (키 값은 절대 노출하지 않는다)."""
+    cfg = Config.from_env()
+    has_cred = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+    if not cfg.factory_enabled and not cfg.factory_demo:
+        mode, hint = "disabled", "BOOPANG_FACTORY_ENABLED=true (그리고 ANTHROPIC_API_KEY) 또는 BOOPANG_FACTORY_DEMO=true 로 활성화하세요."
+    elif cfg.factory_demo:
+        mode, hint = "demo", "데모 모드: 요청과 무관한 고정 샘플을 생성합니다."
+    elif not has_cred:
+        mode, hint = "unconfigured", "ANTHROPIC_API_KEY 환경변수가 필요합니다."
+    else:
+        mode, hint = "llm", ""
+    return {"mode": mode, "model": cfg.llm_model if mode in ("llm", "unconfigured") else None, "hint": hint,
+            "limits": {"max_files": cfg.factory_max_files, "max_calls": cfg.factory_max_calls,
+                       "max_jobs_per_hour": cfg.factory_max_jobs_per_hour}}
+
+
+@app.post("/api/factory/jobs", status_code=201)
+async def api_factory_job(request: str = Form(...)):
+    """자연어 요구사항 → 소프트웨어 제작 파이프라인 시작."""
+    cfg = Config.from_env()
+    if not cfg.factory_enabled and not cfg.factory_demo:
+        raise HTTPException(403, "소프트웨어 팩토리가 비활성화되어 있습니다. BOOPANG_FACTORY_ENABLED=true 와 ANTHROPIC_API_KEY 를 설정하거나 데모 모드를 켜세요.")
+    if len(request) > 4000:
+        raise HTTPException(413, "요구사항은 4000자 이내로 입력하세요.")
+    try:
+        llm = make_llm(cfg)
+        manager.check_hourly(cfg.factory_max_jobs_per_hour)
+        job = manager.create(request, "(software request)", kind="software", max_len=4000)
+    except JobLimitError as exc:
+        raise HTTPException(429, str(exc)) from exc
+    except Exception as exc:  # LLM 클라이언트 초기화 실패 등 — 상세는 숨긴다
+        raise HTTPException(500, "LLM 클라이언트를 초기화할 수 없습니다. 서버 설정을 확인하세요.") from exc
+    task = asyncio.create_task(run_software_job(job, cfg, llm))
+    _tasks.add(task)
+    task.add_done_callback(_tasks.discard)
+    return {"job_id": job.id, "events_url": f"/api/jobs/{job.id}/events"}
 
 
 @app.post("/api/jobs", status_code=201)
@@ -204,5 +247,27 @@ def api_job_download(job_id: str, fmt: str):
         raise HTTPException(400, "fmt 는 csv, json, xlsx 중 하나여야 합니다.")
     if not job.done or job.error or fmt not in job.outputs:
         raise HTTPException(409, "산출물이 아직 준비되지 않았습니다.")
+    if fmt == "zip":
+        slug = (job.software or {}).get("slug") or "project"
+        return Response(job.outputs["zip"], media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="{slug}.zip"'})
     return Response(job.outputs[fmt], media_type=FORMATS[fmt][0],
                     headers={"Content-Disposition": f'attachment; filename="{FORMAT_NAMES[fmt]}"'})
+
+
+@app.get("/api/jobs/{job_id}/files")
+def api_job_files(job_id: str):
+    job = _job_or_404(job_id)
+    if job.project is None:
+        raise HTTPException(409, "생성된 프로젝트가 아직 없습니다.")
+    return job.project.tree()
+
+
+@app.get("/api/jobs/{job_id}/file")
+def api_job_file(job_id: str, path: str = Query(..., max_length=200)):
+    """생성된 소스 한 파일의 내용 (text/plain). 딕셔너리 정확 일치만 허용하므로 경로 탐색이 불가능하다."""
+    job = _job_or_404(job_id)
+    if job.project is None or path not in job.project.files:
+        raise HTTPException(404, "파일을 찾을 수 없습니다.")
+    return Response(job.project.files[path], media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": "inline"})

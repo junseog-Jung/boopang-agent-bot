@@ -65,6 +65,15 @@ class Config:
     max_upload_bytes: int = 5 * 1024 * 1024
     max_rows: int = 20000
     schema_file: str = ""                    # 빈 값이면 내장 기본 WMS 스키마
+    factory_enabled: bool = False            # 범용 소프트웨어 팩토리(유료 LLM 호출) 사용 허용
+    factory_demo: bool = False               # 키 없이 쓰는 고정 샘플 데모 모드 (요청과 무관한 샘플 생성)
+    llm_model: str = "claude-opus-5-5"
+    llm_effort: str = "medium"               # low | medium | high | xhigh | max
+    factory_max_files: int = 25
+    factory_max_file_bytes: int = 60_000
+    factory_max_total_bytes: int = 400_000
+    factory_max_calls: int = 40              # 작업 1건당 LLM 호출 상한 (비용 보호)
+    factory_max_jobs_per_hour: int = 10
     step_delay: float = 0.4                  # 관제 대시보드 단계 간 연출 지연(초). 처리 결과와 무관, 0 이면 즉시
 
     def __post_init__(self):
@@ -74,6 +83,15 @@ class Config:
             raise ValueError(f"BOOPANG_BILL_BASIS: {', '.join(BILL_BASES)} 중 하나여야 합니다")
         if self.free_shipping_threshold < 0 or self.shipping_fee < 0:
             raise ValueError("배송비 관련 값은 0 이상이어야 합니다")
+        if self.llm_effort not in ("low", "medium", "high", "xhigh", "max"):
+            raise ValueError("BOOPANG_LLM_EFFORT: low, medium, high, xhigh, max 중 하나여야 합니다")
+        if not self.llm_model.strip():
+            raise ValueError("BOOPANG_LLM_MODEL: 비어 있을 수 없습니다")
+        for name, v in (("FACTORY_MAX_FILES", self.factory_max_files), ("FACTORY_MAX_FILE_BYTES", self.factory_max_file_bytes),
+                        ("FACTORY_MAX_TOTAL_BYTES", self.factory_max_total_bytes), ("FACTORY_MAX_CALLS", self.factory_max_calls),
+                        ("FACTORY_MAX_JOBS_PER_HOUR", self.factory_max_jobs_per_hour)):
+            if v <= 0:
+                raise ValueError(f"BOOPANG_{name}: 1 이상이어야 합니다")
         if not (0 <= self.step_delay <= 5):
             raise ValueError("BOOPANG_STEP_DELAY: 0~5 초 사이여야 합니다")
         if self.max_upload_bytes <= 0 or self.max_rows <= 0:
@@ -96,4 +114,13 @@ class Config:
             max_rows=_env_int("BOOPANG_MAX_ROWS", 20000),
             schema_file=os.environ.get("BOOPANG_SCHEMA_FILE", "").strip(),
             step_delay=_env_float("BOOPANG_STEP_DELAY", 0.4),
+            factory_enabled=_env_bool("BOOPANG_FACTORY_ENABLED", False),
+            factory_demo=_env_bool("BOOPANG_FACTORY_DEMO", False),
+            llm_model=os.environ.get("BOOPANG_LLM_MODEL", "claude-opus-5-5").strip() or "claude-opus-5-5",
+            llm_effort=os.environ.get("BOOPANG_LLM_EFFORT", "medium").strip().lower() or "medium",
+            factory_max_files=_env_int("BOOPANG_FACTORY_MAX_FILES", 25),
+            factory_max_file_bytes=_env_int("BOOPANG_FACTORY_MAX_FILE_BYTES", 60_000),
+            factory_max_total_bytes=_env_int("BOOPANG_FACTORY_MAX_TOTAL_BYTES", 400_000),
+            factory_max_calls=_env_int("BOOPANG_FACTORY_MAX_CALLS", 40),
+            factory_max_jobs_per_hour=_env_int("BOOPANG_FACTORY_MAX_JOBS_PER_HOUR", 10),
         )

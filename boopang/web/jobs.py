@@ -47,6 +47,21 @@ AGENTS = [
     ("loop", "💰", "Loop Controller", "재작업 루프 · 소요 시간 감시"),
 ]
 AGENT_NAMES = {a[0]: a[2] for a in AGENTS}
+# 소프트웨어 제작 모드에서의 역할 설명 (같은 12개 에이전트)
+SOFTWARE_ROLES = {
+    "ceo": "요구사항 접수 · 위험 요청 게이트 · 최종 승인",
+    "supervisor": "PRD/설계 규칙 검토 · 단계별 승인",
+    "ideation": "자연어 → PRD(요구사항 명세서) 작성",
+    "architecture": "아키텍처 · 기술 스택 · 파일 구조 설계",
+    "uiux": "화면/컴포넌트 구성 계획 정리",
+    "development": "다중 파일 소스코드 생성",
+    "qa": "문법·구조 정적 검사",
+    "refinement": "검사 실패 코드 자가 치유(최대 3회)",
+    "security": "인젝션·시크릿·위험 API 정적 스캔",
+    "devops": ".gitignore 보강 · 프로젝트 ZIP 패키징",
+    "docs": "README · 팩토리 리포트 작성",
+    "loop": "루프 횟수 · LLM 호출/토큰 사용량 감시",
+}
 STATES = {"idle", "thinking", "coding", "reviewing", "done", "skipped", "error"}
 
 
@@ -65,6 +80,9 @@ class Job:
     error: Optional[str] = None
     outputs: dict = field(default_factory=dict)   # fmt -> bytes
     summary: Optional[dict] = None
+    kind: str = "logistics"                       # logistics | software
+    project: Optional[object] = None              # factory.project.Project (software)
+    software: Optional[dict] = None               # PRD/설계/검수 결과 요약 (software)
     loop_count: int = 0
     cond: asyncio.Condition = field(default_factory=asyncio.Condition)
 
@@ -81,7 +99,8 @@ class Job:
     def public(self) -> dict:
         return {
             "job_id": self.id, "filename": self.filename, "done": self.done, "error": self.error,
-            "event_count": len(self.events), "summary": self.summary,
+            "event_count": len(self.events), "summary": self.summary, "kind": self.kind,
+            "software": self.software,
             "downloads": sorted(self.outputs) if self.done and not self.error else [],
         }
 
@@ -104,11 +123,19 @@ class JobManager:
     def running(self) -> int:
         return sum(1 for j in self.jobs.values() if not j.done)
 
-    def create(self, instruction: str, filename: str) -> Job:
+    def check_hourly(self, limit: int) -> None:
+        """유료 LLM 작업의 시간당 생성 횟수 제한 (인증이 없으므로 비용 보호용)."""
+        now = time.time()
+        self.hourly = [t for t in getattr(self, "hourly", []) if now - t < 3600]
+        if len(self.hourly) >= limit:
+            raise JobLimitError(f"시간당 소프트웨어 제작 한도({limit}건)를 초과했습니다. 잠시 후 다시 시도하세요.")
+        self.hourly.append(now)
+
+    def create(self, instruction: str, filename: str, kind: str = "logistics", max_len: int = 1000) -> Job:
         self.purge()
         if self.running() >= self.max_running:
             raise JobLimitError("동시에 처리 중인 작업이 너무 많습니다. 잠시 후 다시 시도하세요.")
-        job = Job(id=secrets.token_urlsafe(16), instruction=clean_instruction(instruction), filename=filename)
+        job = Job(id=secrets.token_urlsafe(16), instruction=clean_instruction(instruction, max_len), filename=filename, kind=kind)
         self.jobs[job.id] = job
         return job
 
@@ -118,15 +145,15 @@ class JobManager:
         return self.jobs.get(job_id)
 
 
-def clean_instruction(text: str) -> str:
-    return _CONTROL.sub("", (text or "").strip())[:1000]
+def clean_instruction(text: str, max_len: int = 1000) -> str:
+    return _CONTROL.sub("", (text or "").strip())[:max_len]
 
 
 def _fmt(d) -> str:
     return f"{Decimal(d):,.0f}원"
 
 
-class _Runner:
+class Runner:
     def __init__(self, job: Job, cfg: Config):
         self.job, self.cfg = job, cfg
         self.t0 = time.perf_counter()
@@ -145,24 +172,24 @@ class _Runner:
 
 
 async def run_job(job: Job, content: bytes, cfg: Config) -> None:
-    r = _Runner(job, cfg)
+    r = Runner(job, cfg)
     stage = "ceo"
     try:
         await _pipeline(r, content)
     except ParseError as exc:
-        await _fail(r, "ideation", f"파일을 해석할 수 없습니다: {exc}")
+        await fail_job(r, "ideation", f"파일을 해석할 수 없습니다: {exc}")
     except SchemaError as exc:
-        await _fail(r, "architecture", f"WMS 스키마 설정 오류: {exc}")
+        await fail_job(r, "architecture", f"WMS 스키마 설정 오류: {exc}")
     except UnicodeEncodeError:
-        await _fail(r, "devops", "스키마의 출력 인코딩으로 표현할 수 없는 문자가 포함되어 있습니다.")
+        await fail_job(r, "devops", "스키마의 출력 인코딩으로 표현할 수 없는 문자가 포함되어 있습니다.")
     except Exception:  # 내부 예외 상세는 서버 로그에만 남기고 화면에는 노출하지 않는다
         log.exception("job %s failed", job.id)
-        await _fail(r, stage, "처리 중 내부 오류가 발생했습니다. 서버 로그를 확인하세요.")
+        await fail_job(r, stage, "처리 중 내부 오류가 발생했습니다. 서버 로그를 확인하세요.")
     finally:
         await job.finish()
 
 
-async def _fail(r: _Runner, agent: str, message: str) -> None:
+async def fail_job(r: Runner, agent: str, message: str) -> None:
     r.job.error = message
     await r.say(agent, message, "error")
     await r.state(agent, "error", message)
@@ -170,7 +197,7 @@ async def _fail(r: _Runner, agent: str, message: str) -> None:
     await r.job.emit("error", message=message)
 
 
-async def _pipeline(r: _Runner, content: bytes) -> None:
+async def _pipeline(r: Runner, content: bytes) -> None:
     job, cfg = r.job, r.cfg
 
     # 1. CEO — 지시 접수
