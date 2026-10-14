@@ -57,3 +57,24 @@ CLI(`boopang/cli.py`)와 웹(`boopang/web/app.py`)이 이를 공유한다.
 4. 검수수량 0 → BACKORDER, 0 < 검수 < 주문 → PARTIAL
 5. 검수수량 ≥ 주문 → READY, 검수수량 공란 → INSPECT_PENDING
 주문 롤업: 취소 제외 후, HOLD 있으면 HOLD / 단일 상태면 그 상태 / SHIPPING·DELIVERED 혼합이면 SHIPPING / 그 외 PARTIAL
+
+## 범용 소프트웨어 팩토리 (`boopang/factory/`)
+```
+자연어 요구사항 ─► prompts(PRD) ─► LLM ─► validate_prd ─► (거절 게이트)
+                ─► prompts(ARCH) ─► LLM ─► validate_arch(경로/개수/한도)
+                ─► 파일별 prompts(DEV) ─► LLM ─► Project.set(검증)   ← 다중 파일
+                ─► qa_check + security_scan ─┐
+                       ▲                      │ ERROR 있으면 (최대 3회)
+                       └── REFINE ◄─ LLM ◄───┘
+                ─► README · .gitignore · FACTORY_REPORT ─► Project.to_zip
+```
+| 모듈 | 책임 |
+|------|------|
+| llm.py | Claude 어댑터(구조화 출력 JSON 스키마, 호출 상한, 토큰 집계, 오류 정규화), `ScriptedLLM` |
+| prompts.py | 단계별 시스템 프롬프트·JSON 스키마·사용자 메시지 구성 |
+| project.py | 신뢰할 수 없는 생성 파일 컨테이너: 경로/확장자/용량 검증, 재현 가능한 ZIP |
+| checks.py | 정적 QA(ast/JSON/node --check/HTML/import)와 보안 스캔 |
+| pipeline.py | 12 에이전트 단계 실행, 자가 치유 루프, 에스컬레이션, 리포트 |
+| demo.py | 키 없는 데모(요청과 무관한 고정 샘플) |
+
+설계 원칙: ① 생성 코드는 실행하지 않는다 ② LLM 출력은 모두 검증 후 사용한다 ③ 비용은 호출 상한·시간당 제한·기본 비활성으로 보호한다.

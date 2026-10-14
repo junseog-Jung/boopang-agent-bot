@@ -8,24 +8,40 @@
 </head>
 <body>
 <header class="top">
-  <h1>🛰️ 부팡 멀티 에이전트 관제 센터</h1>
+  <h1>🏢 부팡 소프트웨어 팩토리 · 관제 센터</h1>
   <nav><a href="/api/sample">샘플 파일</a><a href="/converter">표 미리보기 변환기</a><a href="/api/docs">API 문서</a></nav>
 </header>
 
 <main>
   <section class="panel" aria-labelledby="h-job">
     <h2 id="h-job">업무 지시</h2>
+    <div class="modes" role="tablist" aria-label="작업 종류">
+      <button type="button" role="tab" id="mode-logistics" class="mode active" aria-selected="true">📦 물류 변환 (엑셀/CSV → WMS)</button>
+      <button type="button" role="tab" id="mode-software" class="mode" aria-selected="false">🧠 소프트웨어 제작 (자연어 → 코드)</button>
+    </div>
+
     <form id="job-form">
-      <label class="field">
-        <span>업무 지시 / 메모 <small>(처리 리포트와 로그에 기록됩니다. AI가 해석하지는 않습니다)</small></span>
-        <textarea id="instruction" name="instruction" rows="2" maxlength="1000"
-                  placeholder="예) 10월 2주차 입고분 검수 후 WMS 업로드용으로 변환"></textarea>
-      </label>
-      <div id="drop" class="drop" tabindex="0" role="button" aria-label="엑셀 또는 CSV 파일 선택">
-        <strong id="drop-label">패킹리스트/주문 파일(.xlsx, .csv)을 끌어놓거나 클릭하세요</strong>
-        <small>최대 5MB · 20,000행</small>
-        <input id="file" name="file" type="file" accept=".xlsx,.csv" hidden>
+      <div id="box-logistics">
+        <label class="field">
+          <span>업무 지시 / 메모 <small>(처리 리포트와 로그에 기록됩니다. AI가 해석하지는 않습니다)</small></span>
+          <textarea id="instruction" rows="2" maxlength="1000" placeholder="예) 10월 2주차 입고분 검수 후 WMS 업로드용으로 변환"></textarea>
+        </label>
+        <div id="drop" class="drop" tabindex="0" role="button" aria-label="엑셀 또는 CSV 파일 선택">
+          <strong id="drop-label">패킹리스트/주문 파일(.xlsx, .csv)을 끌어놓거나 클릭하세요</strong>
+          <small>최대 5MB · 20,000행</small>
+          <input id="file" type="file" accept=".xlsx,.csv" hidden>
+        </div>
       </div>
+
+      <div id="box-software" hidden>
+        <label class="field">
+          <span>만들고 싶은 소프트웨어 <small>(자연어 요구사항 · 최대 4,000자)</small></span>
+          <textarea id="request" rows="4" maxlength="4000" placeholder="예) 재고를 입출고로 관리하고 부족 알림을 보여주는 웹앱을 FastAPI + SQLite 로 만들어 줘"></textarea>
+        </label>
+        <div class="chips" id="examples" aria-label="예시 요구사항"></div>
+        <p id="factory-status" class="factory-status" role="status"></p>
+      </div>
+
       <div class="row">
         <button id="start" type="submit" disabled>에이전트 팀 가동 ▶</button>
         <span id="form-msg" role="status"></span>
@@ -45,8 +61,17 @@
   </section>
 
   <section aria-labelledby="h-agents">
-    <h2 id="h-agents" class="sr">에이전트 상태</h2>
-    <div id="agents" class="agents"></div>
+    <h2 id="h-agents" class="sr">에이전트 사무실</h2>
+    <div id="office" class="office">
+      <svg id="flow" class="flow-layer" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="beam" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#38bdf8" stop-opacity="0"/><stop offset=".5" stop-color="#a78bfa"/><stop offset="1" stop-color="#34d399"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <div id="agents" class="agents"></div>
+    </div>
   </section>
 
   <section class="panel">
@@ -58,16 +83,37 @@
   </section>
 
   <section id="result" class="panel" hidden>
-    <h2>변환 결과</h2>
-    <div id="cards" class="cards"></div>
-    <div class="downloads">
-      <a id="dl-csv" class="btn" download>⬇ WMS CSV</a>
-      <a id="dl-json" class="btn" download>⬇ JSON</a>
-      <a id="dl-xlsx" class="btn" download>⬇ XLSX 리포트</a>
+    <h2 id="result-title">변환 결과</h2>
+    <div id="res-logistics" hidden>
+      <div id="cards" class="cards"></div>
+      <div class="downloads">
+        <a id="dl-csv" class="btn" download>⬇ WMS CSV</a>
+        <a id="dl-json" class="btn" download>⬇ JSON</a>
+        <a id="dl-xlsx" class="btn" download>⬇ XLSX 리포트</a>
+      </div>
+      <small class="muted">결과는 서버 메모리에 30분간만 보관되며 이후 삭제됩니다.</small>
     </div>
-    <small class="muted">결과는 서버 메모리에 30분간만 보관되며 이후 삭제됩니다.</small>
+
+    <div id="res-software" hidden>
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" class="tab active" data-tab="sw-summary" aria-selected="true">요약</button>
+        <button type="button" role="tab" class="tab" data-tab="sw-spec" aria-selected="false">PRD · 설계</button>
+        <button type="button" role="tab" class="tab" data-tab="sw-code" aria-selected="false">소스 코드</button>
+        <a id="dl-zip" class="btn zip" download>⬇ 프로젝트 ZIP</a>
+      </div>
+      <div id="sw-summary" class="tabpane"></div>
+      <div id="sw-spec" class="tabpane" hidden></div>
+      <div id="sw-code" class="tabpane" hidden>
+        <div class="code-view">
+          <ul id="file-tree" class="file-tree" role="listbox" aria-label="생성된 파일"></ul>
+          <div class="code-pane"><div id="code-title" class="code-title">파일을 선택하세요</div><pre id="code" class="code"></pre></div>
+        </div>
+      </div>
+      <small class="muted">생성된 코드는 서버에서 실행되지 않았고 정적 점검만 거쳤습니다. 사용 전에 직접 검토·테스트하세요. 결과는 메모리에 30분간 보관됩니다.</small>
+    </div>
   </section>
 </main>
+<script src="/static/avatars.js"></script>
 <script src="/static/dashboard.js"></script>
 </body>
 </html>

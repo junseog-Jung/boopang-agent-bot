@@ -149,3 +149,15 @@ def test_step_delay_env_validation(client, monkeypatch):
     monkeypatch.setenv("BOOPANG_STEP_DELAY", "abc")
     with pytest.raises(ValueError, match="STEP_DELAY"):
         Config.from_env()
+
+
+def test_dashboard_assets_and_controls(client):
+    html = client.get("/").text
+    for needle in ('id="mode-software"', 'id="request"', 'id="flow"', 'id="file-tree"', 'id="dl-zip"', "/static/avatars.js"):
+        assert needle in html, needle
+    js = client.get("/static/avatars.js")
+    assert js.status_code == 200 and "Avatars" in js.text
+    csp = client.get("/").headers["content-security-policy"]
+    assert "script-src 'self'" in csp and "unsafe-inline" not in csp
+    # 인라인 style 속성이 없어야 CSP(style-src 'self')에서 아바타가 깨지지 않는다
+    assert " style=" not in html and " style=" not in js.text

@@ -1,13 +1,14 @@
 # 📦 부팡 물류 및 주문 처리 자동화 봇 (boopang-agent-bot)
 
-엑셀/CSV **패킹리스트·주문 데이터**를 업로드하면 자동으로
-**품목별 검수 → 단가 계산 → 배송 상태 분류 → 물류 DB(WMS) 연동 포맷 변환**을 수행합니다.
+두 가지 모드를 가진 멀티 에이전트 관제 대시보드(`http://127.0.0.1:8899/`)입니다.
+1. **📦 물류 변환** — 엑셀/CSV **패킹리스트·주문 데이터**를 업로드하면 **품목별 검수 → 단가 계산 → 배송 상태 분류 → 물류 DB(WMS) 연동 포맷 변환**을 수행합니다.
+2. **🧠 소프트웨어 제작 (범용 팩토리)** — 자연어 요구사항을 PRD → 설계 → **다중 파일 소스코드** → 정적 QA·보안 스캔 → 자가 치유 → **ZIP**으로 만듭니다. (Claude API 필요, 아래 참고)
 
 ## 빠른 시작
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest -q                      # 테스트 92건
+python -m pytest -q                      # 테스트 167건
 uvicorn boopang.web.app:app --host 127.0.0.1 --port 8899   # 관제 대시보드 → http://127.0.0.1:8899/
 ```
 - **포트는 8899 고정을 권장**합니다 (다른 봇과의 충돌 방지). 다른 값이 필요하면 `--port` 로 지정하세요.
@@ -18,7 +19,10 @@ uvicorn boopang.web.app:app --host 127.0.0.1 --port 8899   # 관제 대시보드
 
 ## 멀티 에이전트 관제 대시보드 (http://127.0.0.1:8899/)
 1. **업무 지시 + 파일 업로드** → `에이전트 팀 가동`
-2. **12개 에이전트 상태 카드**가 대기 → 구상 중 → 코딩 중 → 검수 중 → 완료(오류/생략 포함)로 실시간 전환됩니다 (애니메이션, `prefers-reduced-motion` 존중).
+2. **12명의 오피스 직원 카드**가 대기 → 구상 중 → 코딩 중 → 검수 중 → 완료(오류/생략 포함)로 실시간 전환됩니다.
+   - 직원마다 외모·소품이 다른 SVG 아바타가 책상에서 일합니다 (타이핑, 화이트보드 필기, 서류·체크리스트 검토, 코드 스크롤, 쉴 때는 커피 김 등).
+   - **핸드오프 연출**: 한 에이전트가 일을 마치고 다음 에이전트가 시작하면 문서 패킷과 빛줄기가 카드 사이를 날아가 도착 지점에서 터집니다. 일하는 카드는 상태 색(보라/하늘/호박)으로 빛나고, 대기 카드는 채도를 낮춘 대기 모드입니다.
+   - 서버 로그가 오면 해당 직원 머리 위에 **말풍선**으로 잠깐 표시됩니다. `prefers-reduced-motion` 설정을 존중합니다(패킷 생략).
 3. **실시간 로그 터미널**: 서버가 SSE(Server-Sent Events)로 단계별 로그를 스트리밍합니다. 끊기면 `Last-Event-ID` 로 이어받습니다.
 4. 완료되면 요약 카드와 **WMS CSV / JSON / XLSX 리포트 다운로드 버튼**이 나타납니다.
 
@@ -44,6 +48,58 @@ uvicorn boopang.web.app:app --host 127.0.0.1 --port 8899   # 관제 대시보드
 
 운영 특성: 작업 결과는 **서버 메모리에 30분간만** 보관 후 삭제, 동시 처리 3건 제한(초과 시 429), 작업 ID는 추측 불가한 랜덤 토큰.
 표 형태로 주문을 훑어보고 싶다면 `/converter` 를 사용하세요.
+
+## 🧠 범용 소프트웨어 팩토리 (소프트웨어 제작 모드)
+
+대시보드에서 **소프트웨어 제작** 탭을 고르고 만들고 싶은 것을 자연어로 적으면 12개 역할이 아래처럼 일합니다.
+
+| 단계 | 에이전트 | 실제 동작 |
+|------|----------|-----------|
+| 1 | CEO | 요구사항 접수, 위험 요청 거절 게이트, 최종 보고 |
+| 2 | Ideation | LLM 이 자연어 → **PRD**(기능·스택·위험·가정) 작성 |
+| 3 | Architecture / Supervisor | LLM 이 아키텍처·**파일 구조** 설계, 규칙 기반으로 경로/개수/한도 검증 |
+| 4 | UI/UX | 화면 계획 정리 (UI 없으면 생략) |
+| 5 | Development | 파일마다 LLM 호출로 **다중 파일 코드** 생성 |
+| 6 | QA | 파이썬 `ast`, JSON, `node --check`(있을 때), HTML 태그, 미선언 import 정적 검사 |
+| 7 | Security | 정적 보안 스캔: `eval/exec`, `os.system`, `shell=True`, 역직렬화, **SQL 인젝션**, TLS 검증 해제, **하드코딩 시크릿**, **innerHTML XSS** 등 |
+| 8 | Refinement | ERROR 가 있으면 LLM 이 해당 파일만 수정 → 재검사, **최대 3회**. 해결 못 하면 **에스컬레이션**(사람 검토 필요로 표기) |
+| 9 | DevOps / Documentation | `.gitignore` 보강, README·`FACTORY_REPORT.md` 작성, **ZIP 패키징**(`<slug>/…` 레포 구조) |
+| 10 | Loop Controller | 루프 횟수, LLM 호출 수, 토큰 사용량 점검 |
+
+결과 화면에는 **요약 / PRD·설계 / 소스 코드 뷰어(파일 트리)** 탭과 **프로젝트 ZIP 다운로드**가 나옵니다.
+
+### 켜는 방법 (기본은 꺼져 있음 — 유료 호출이고 인증이 없기 때문)
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...        # 저장소/로그에 남기지 마세요
+export BOOPANG_FACTORY_ENABLED=true
+uvicorn boopang.web.app:app --host 127.0.0.1 --port 8899
+```
+키 없이 화면과 파이프라인만 보고 싶다면 `BOOPANG_FACTORY_DEMO=true` — **요청과 무관하게 항상 같은 '할 일 관리' 샘플**을 만듭니다(자가 치유 시연을 위해 SQL 인젝션 결함을 일부러 넣고 고칩니다). 화면과 리포트에 데모라고 명시됩니다.
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| BOOPANG_FACTORY_ENABLED | false | 소프트웨어 팩토리 허용 (`/api/factory/jobs` 가 403 이 아니게 됨) |
+| BOOPANG_FACTORY_DEMO | false | 키 없이 쓰는 고정 샘플 데모 |
+| ANTHROPIC_API_KEY | — | Claude API 키 (환경변수로만 읽고 로그·응답에 쓰지 않음) |
+| BOOPANG_LLM_MODEL | claude-opus-5-5 | 사용할 Claude 모델 |
+| BOOPANG_LLM_EFFORT | medium | low / medium / high / xhigh / max |
+| BOOPANG_FACTORY_MAX_FILES | 25 | 프로젝트당 최대 파일 수 |
+| BOOPANG_FACTORY_MAX_FILE_BYTES | 60000 | 파일당 최대 크기 |
+| BOOPANG_FACTORY_MAX_TOTAL_BYTES | 400000 | 프로젝트 전체 최대 크기 |
+| BOOPANG_FACTORY_MAX_CALLS | 40 | 작업 1건당 LLM 호출 상한 (설계가 이보다 크면 시작 전에 거절) |
+| BOOPANG_FACTORY_MAX_JOBS_PER_HOUR | 10 | 시간당 제작 건수 제한 (비용 보호) |
+
+### 안전장치
+- 생성된 코드는 **이 서버에서 절대 실행하지 않습니다.** 문법·정적 보안 점검만 합니다.
+- LLM 이 만든 경로/내용은 신뢰하지 않습니다: 경로 탐색(`..`, 절대경로, 숨김 파일, `.env`)·허용 확장자·파일 수·크기 검증, ZIP 은 실행 비트 없이 생성, 리파인은 **이미 있는 문제 파일만** 수정 가능.
+- 사용자 요구사항은 '데이터'로만 취급하도록 프롬프트에 명시, 명백히 해로운 요청은 PRD 단계에서 거절합니다.
+- 오류 메시지에는 API 키나 응답 본문을 넣지 않습니다. 소스 뷰어는 `textContent`/`text/plain` 으로만 표시합니다.
+
+### 한계 (정직하게)
+- **정적 점검 통과 ≠ 동작 보장.** 테스트를 실행하지 않으므로 런타임 오류·논리 오류·import 경로 문제는 못 잡습니다. 생성 결과는 **초안**이며 직접 검토·테스트해야 합니다. (데모 프로젝트를 풀어 테스트를 돌려 보다가 `pytest` import 경로 결함을 실제로 발견해 고쳤습니다.)
+- **실제 Claude 호출 경로는 이 저장소 개발 환경에서 라이브로 검증하지 못했습니다**(API 키 없음). 요청 형태는 SDK 타입과 모킹 테스트로 검증했고, 첫 실제 사용 시 모델 출력이 스키마/한도에 맞는지 확인하세요.
+- 프리뷰 URL 발급, 샌드박스(컨테이너) 실행, GitHub 자동 푸시는 **구현하지 않았습니다.** 격리된 실행 환경과 토큰 권한 설계가 먼저 필요한 후속 과제입니다.
+- 한 번에 큰 시스템(예: 인스타그램 클론 전체)은 파일/호출 한도 안의 MVP 범위로 줄여서 만듭니다.
 
 ## Docker 배포 / 운영
 
@@ -145,11 +201,14 @@ python -m boopang.cli 입력.xlsx --schema schema_config.example.json   # CLI �
 |--------|------|------|
 | GET | /health | 상태 확인 |
 | GET | /api/sample | 샘플 xlsx |
-| GET | /api/agents | 에이전트 12개 목록 |
+| GET | /api/agents?mode=logistics\|software | 에이전트 12개 목록(모드별 역할 설명) |
+| GET | /api/factory/status | 소프트웨어 팩토리 사용 가능 상태 (`llm`/`demo`/`unconfigured`/`disabled`) |
+| POST | /api/factory/jobs | form `request`(자연어 요구사항) → 제작 파이프라인 시작 (`job_id`) |
+| GET | /api/jobs/{id}/files, /file?path= | 생성된 파일 트리 / 파일 내용(text/plain) |
 | POST | /api/jobs | multipart `file` + `instruction` → 파이프라인 시작 (`job_id`) |
 | GET | /api/jobs/{id} | 작업 상태·요약 |
 | GET | /api/jobs/{id}/events | 실시간 로그/상태 SSE 스트림 |
-| GET | /api/jobs/{id}/download/{csv\|json\|xlsx} | 산출물 다운로드 (완료 전 409) |
+| GET | /api/jobs/{id}/download/{csv\|json\|xlsx\|zip} | 산출물 다운로드 (완료 전 409) |
 | POST | /api/process | multipart `file` → JSON (summary, orders[lines], issues) |
 | POST | /api/convert?format=csv\|json\|xlsx | multipart `file` → 파일 다운로드 |
 | GET | /api/docs | Swagger UI |
