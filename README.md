@@ -8,7 +8,7 @@
 
 ```bash
 pip install -r requirements-dev.txt
-python -m pytest -q                      # 테스트 167건
+python -m pytest -q                      # 테스트 (Docker 샌드박스 이미지가 있으면 격리 테스트 포함)
 uvicorn boopang.web.app:app --host 127.0.0.1 --port 8899   # 관제 대시보드 → http://127.0.0.1:8899/
 ```
 - **포트는 8899 고정을 권장**합니다 (다른 봇과의 충돌 방지). 다른 값이 필요하면 `--port` 로 지정하세요.
@@ -89,16 +89,60 @@ uvicorn boopang.web.app:app --host 127.0.0.1 --port 8899
 | BOOPANG_FACTORY_MAX_CALLS | 40 | 작업 1건당 LLM 호출 상한 (설계가 이보다 크면 시작 전에 거절) |
 | BOOPANG_FACTORY_MAX_JOBS_PER_HOUR | 10 | 시간당 제작 건수 제한 (비용 보호) |
 
+### 🆓 로컬 무료 LLM: Ollama
+API 비용 없이 로컬 오픈소스 코딩 모델로 생성할 수 있습니다 (Claude 와 같은 파이프라인, 공급자만 교체).
+```bash
+ollama serve &                                   # https://ollama.com 에서 설치
+ollama pull qwen2.5-coder:7b-instruct            # 또는 deepseek-coder 등
+export BOOPANG_FACTORY_ENABLED=true BOOPANG_LLM_PROVIDER=ollama
+uvicorn boopang.web.app:app --host 127.0.0.1 --port 8899
+```
+- 구조화 출력(`format` JSON 스키마)을 사용하므로 **Ollama 0.5 이상**이 필요합니다. 형식을 어기면 1회 교정 재시도합니다.
+- 기본 컨텍스트(`num_ctx`)는 8192로 올려서 호출합니다 (Ollama 기본값은 코드 생성에 너무 작습니다). CPU 추론은 느려서 타임아웃 기본값이 600초입니다.
+- **작은 모델(7B)은 품질이 낮습니다.** 파일 수를 줄이고(`BOOPANG_FACTORY_MAX_FILES=8` 등) 요구사항을 작게 시작하세요. 자가 치유 루프가 일부를 보완하지만 한계가 있습니다. 가능하면 14B 이상을 권장합니다.
+- Docker compose 에서 호스트의 Ollama 에 연결하려면 호스트에서 `OLLAMA_HOST=0.0.0.0 ollama serve` 로 띄우세요 (`host.docker.internal` 사용).
+
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| BOOPANG_LLM_PROVIDER | anthropic | `anthropic` \| `ollama` \| `demo` |
+| BOOPANG_OLLAMA_HOST (또는 OLLAMA_HOST) | http://localhost:11434 | Ollama 서버 주소 (`host:port` 형태도 허용) |
+| BOOPANG_OLLAMA_MODEL | qwen2.5-coder:7b-instruct | 사용할 모델 |
+| BOOPANG_OLLAMA_TIMEOUT / BOOPANG_OLLAMA_NUM_CTX | 600 / 8192 | 응답 대기(초) / 컨텍스트 길이 |
+
+### 🔌 MCP 도구 서버 (`boopang/mcp_server.py`)
+에이전트는 **MCP(Model Context Protocol, stdio)** 로 파일을 만들고 검증합니다. 작업마다 격리된 임시 디렉터리를 root 로 하는 MCP 서버(`python -m boopang.mcp_server --root …`)를 띄우고, 파이프라인이 MCP 클라이언트로 호출합니다.
+
+| 도구 | 역할 |
+|------|------|
+| `write_project_file(file_path, content)` | 워크스페이스 안에 파일 생성/덮어쓰기 |
+| `read_project_file(file_path)` | 파일 읽기 |
+| `list_project_files()` | 파일 목록 + sha256 (Supervisor 가 메모리 결과와 **해시로 디스크 대조**) |
+| `run_command(command)` | **허용 목록** 명령만: `pytest [-q -x -v -k 식 경로]`, `python -m py_compile <파일>`, `node --check <파일>` |
+
+> **설계상 일부러 다르게 만든 점**: 흔한 예시처럼 `run_command` 를 `subprocess.run(shell=True)` 로, `write_project_file` 을 임의 경로로 열어두면 LLM(또는 요구사항에 섞인 프롬프트 인젝션)이 호스트에서 임의 명령 실행·임의 파일 덮어쓰기를 할 수 있습니다. 그래서 ① 모든 경로를 워크스페이스 안으로 가두고(`..`·절대경로·심볼릭 링크·`.env`·허용 외 확장자 거부, 파일 수/크기 한도) ② 셸 없이 argv 로 실행하며 허용 목록 밖의 명령(`rm`, `curl`, `pip install`, `python -c`, 파이프/`;` 등)은 거부하고 ③ MCP 서버 프로세스에는 API 키 등 서버 환경변수를 넘기지 않습니다.
+> `mcp` 패키지는 2.x 에서 `FastMCP` 가 `MCPServer` 로 바뀌어 `from mcp.server.fastmcp import FastMCP` 가 깨지므로 `mcp>=1.9,<2` 로 고정했습니다.
+> MCP 서버를 못 띄우면(미설치 등) 경고를 표시하고 메모리 모드로 계속합니다. `BOOPANG_FACTORY_MCP=false` 로 끌 수 있습니다.
+
+### 🧪 테스트 실행 모드 (`BOOPANG_FACTORY_EXEC`)
+| 값 | 동작 |
+|----|------|
+| `off` (기본) | 생성된 테스트를 **실행하지 않음** (문법 검사·정적 보안 스캔만) |
+| `docker` | 생성된 `pytest` 를 **네트워크 차단·비루트·읽기 전용 루트·메모리/CPU/PID 제한** Docker 컨테이너에서 실행. 먼저 `deploy/build_sandbox.sh` 로 `boopang-sandbox` 이미지를 빌드. 컨테이너에 네트워크가 없으므로 이미지에 설치된 패키지(pytest, fastapi, httpx, uvicorn, pydantic, flask, requests, jinja2, sqlalchemy)만 쓸 수 있고, 설계 프롬프트가 이 목록을 모델에 알려줍니다 |
+| `local` | **⚠ 격리 없이** 이 서버 프로세스 권한으로 실행(CPU/메모리/파일 크기 rlimit, 환경변수 제거, 타임아웃 시 프로세스 그룹 강제 종료만 적용). 생성된 코드는 네트워크와 파일 시스템에 접근할 수 있으므로 **신뢰할 수 있는 로컬 개발 PC 에서만** 쓰세요 |
+
+실행 결과(통과/실패와 출력)는 QA 의 발견 사항이 되어 **자가 치유 루프로 되돌아갑니다**(최대 3회). `docker`/`local` 은 호스트에서 직접 uvicorn 을 띄울 때 쓰며, 제공된 docker compose(읽기 전용·소켓 없음)에서는 `off` 로 고정되어 있습니다. 환경변수 `BOOPANG_SANDBOX_IMAGE`, `BOOPANG_EXEC_TIMEOUT`(기본 60초), `BOOPANG_WORKSPACE_DIR`.
+
 ### 안전장치
-- 생성된 코드는 **이 서버에서 절대 실행하지 않습니다.** 문법·정적 보안 점검만 합니다.
+- 생성된 코드는 **기본적으로 서버에서 실행하지 않습니다.** 문법·정적 보안 점검만 합니다. (테스트 실행은 아래 *테스트 실행 모드*에서 명시적으로 켠 경우에만)
 - LLM 이 만든 경로/내용은 신뢰하지 않습니다: 경로 탐색(`..`, 절대경로, 숨김 파일, `.env`)·허용 확장자·파일 수·크기 검증, ZIP 은 실행 비트 없이 생성, 리파인은 **이미 있는 문제 파일만** 수정 가능.
 - 사용자 요구사항은 '데이터'로만 취급하도록 프롬프트에 명시, 명백히 해로운 요청은 PRD 단계에서 거절합니다.
 - 오류 메시지에는 API 키나 응답 본문을 넣지 않습니다. 소스 뷰어는 `textContent`/`text/plain` 으로만 표시합니다.
 
 ### 한계 (정직하게)
-- **정적 점검 통과 ≠ 동작 보장.** 테스트를 실행하지 않으므로 런타임 오류·논리 오류·import 경로 문제는 못 잡습니다. 생성 결과는 **초안**이며 직접 검토·테스트해야 합니다. (데모 프로젝트를 풀어 테스트를 돌려 보다가 `pytest` import 경로 결함을 실제로 발견해 고쳤습니다.)
+- **정적 점검 통과 ≠ 동작 보장.** 테스트 실행 모드가 꺼져 있으면 런타임 오류·논리 오류·import 경로 문제는 못 잡습니다. 생성 결과는 **초안**이며 직접 검토·테스트해야 합니다. (데모 프로젝트를 풀어 테스트를 돌려 보다가 `pytest` import 경로 결함을 실제로 발견해 고쳤습니다.)
 - **실제 Claude 호출 경로는 이 저장소 개발 환경에서 라이브로 검증하지 못했습니다**(API 키 없음). 요청 형태는 SDK 타입과 모킹 테스트로 검증했고, 첫 실제 사용 시 모델 출력이 스키마/한도에 맞는지 확인하세요.
-- 프리뷰 URL 발급, 샌드박스(컨테이너) 실행, GitHub 자동 푸시는 **구현하지 않았습니다.** 격리된 실행 환경과 토큰 권한 설계가 먼저 필요한 후속 과제입니다.
+- **Git MCP(자동 커밋/브랜치)**, 프리뷰 URL 발급, GitHub 자동 푸시는 **구현하지 않았습니다.** 저장소 쓰기 토큰·권한 설계가 먼저 필요한 후속 과제입니다.
+- **Ollama 경로는 실제 모델로 검증하지 못했습니다**(개발 환경에 Ollama 없음). Ollama 와 같은 HTTP 규격의 가짜 서버로 요청 형태·오류 처리·전체 파이프라인을 검증했습니다. 실제 모델의 출력 품질은 직접 확인하세요.
 - 한 번에 큰 시스템(예: 인스타그램 클론 전체)은 파일/호출 한도 안의 MVP 범위로 줄여서 만듭니다.
 
 ## Docker 배포 / 운영

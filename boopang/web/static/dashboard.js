@@ -204,7 +204,9 @@
     const cardsBox = el("div", "cards");
     cardsBox.append(stat("파일", sw.files.length), stat("자가 치유 루프", `${sw.loops}/${MAX_LOOPS}`),
       stat("ERROR", sw.findings.ERROR, sw.findings.ERROR ? "bad" : ""), stat("WARN", sw.findings.WARN, sw.findings.WARN ? "warn" : ""),
-      stat("LLM 호출", sw.llm_calls), stat("토큰 (입력/출력)", `${sw.input_tokens.toLocaleString()} / ${sw.output_tokens.toLocaleString()}`));
+      stat("LLM 호출", `${sw.llm_calls} (${sw.provider || "-"})`), stat("토큰 (입력/출력)", `${sw.input_tokens.toLocaleString()} / ${sw.output_tokens.toLocaleString()}`),
+      stat("MCP 도구 호출", sw.mcp && sw.mcp.enabled ? sw.mcp.calls : "미사용"),
+      stat("테스트 실행", sw.exec && sw.exec.ran ? (sw.exec.passed ? "통과" : "실패") : "안 함", sw.exec && sw.exec.ran && !sw.exec.passed ? "bad" : ""));
     sum.append(cardsBox, el("p", "", sw.summary));
     sum.append(h3("남은 점검 항목"));
     sum.append(sw.remaining.length ? list(sw.remaining.map((f) => `[${f.severity}] ${f.path}:${f.line} ${f.code} — ${f.message}`)) : el("p", "muted", "없음"));
@@ -315,8 +317,15 @@
   async function loadFactoryStatus() {
     try { factory = await (await fetch("/api/factory/status")).json(); } catch (_) { factory = {mode: "disabled", hint: "상태를 확인할 수 없습니다."}; }
     const s = $("factory-status");
-    const text = {llm: `✅ Claude 모델(${factory.model})로 생성합니다. 호출 비용이 발생합니다.`, demo: `⚠ ${factory.hint}`}[factory.mode] || `⛔ ${factory.hint}`;
-    s.textContent = text; s.className = "factory-status " + (factory.mode === "llm" ? "ok" : "warn");
+    const exec = {off: "테스트 실행 안 함(정적 점검만)", docker: "테스트는 네트워크 차단 Docker 샌드박스에서 실행", local: "⚠ 테스트를 이 서버에서 격리 없이 실행(local)"}[factory.exec] || "";
+    const mcp = factory.mcp ? "MCP 경유 파일 기록" : "MCP 미사용";
+    let text;
+    if (factory.mode === "llm" && factory.provider === "ollama") text = `✅ 로컬 Ollama(${factory.model}) — 비용 0원, 데이터가 PC 밖으로 나가지 않습니다. 작은 모델은 느리고 품질이 낮을 수 있습니다.`;
+    else if (factory.mode === "llm") text = `✅ Claude 모델(${factory.model})로 생성합니다. 호출 비용이 발생합니다.`;
+    else if (factory.mode === "demo") text = `⚠ ${factory.hint}`;
+    else text = `⛔ ${factory.hint}`;
+    s.textContent = ["llm", "demo"].includes(factory.mode) ? `${text} · ${mcp} · ${exec}` : text;
+    s.className = "factory-status " + (factory.mode === "llm" && factory.exec !== "local" ? "ok" : "warn");
   }
 
   async function submit(e) {

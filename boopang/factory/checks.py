@@ -24,6 +24,8 @@ class Finding:
     code: str
     message: str
     source: str  # qa | security
+    detail: str = ""        # 테스트 출력 등 자가 치유에 전달할 긴 설명
+    paths: tuple = ()       # 이 발견과 관련된 추가 파일(수정 대상 후보)
 
     def label(self) -> str:
         return f"{self.path}:{self.line} [{self.code}] {self.message}"

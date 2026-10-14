@@ -17,6 +17,7 @@ from ..pipeline import process
 from ..schema import SchemaError, load_schema
 from ..sample import sample_xlsx
 from ..factory.pipeline import make_llm, run_software_job
+from ..llm_client import ollama_status
 from .jobs import AGENTS, SOFTWARE_ROLES, JobLimitError, JobManager, run_job
 
 STATIC = Path(__file__).parent / "static"
@@ -142,18 +143,29 @@ def api_agents(mode: str = Query("logistics")):
 
 @app.get("/api/factory/status")
 def api_factory_status():
-    """범용 소프트웨어 팩토리 사용 가능 여부 (키 값은 절대 노출하지 않는다)."""
+    """범용 소프트웨어 팩토리 사용 가능 상태. 키 값은 절대 노출하지 않는다."""
     cfg = Config.from_env()
-    has_cred = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
-    if not cfg.factory_enabled and not cfg.factory_demo:
-        mode, hint = "disabled", "BOOPANG_FACTORY_ENABLED=true (그리고 ANTHROPIC_API_KEY) 또는 BOOPANG_FACTORY_DEMO=true 로 활성화하세요."
-    elif cfg.factory_demo:
+    provider = "demo" if cfg.demo else cfg.llm_provider
+    model, cost = None, "paid"
+    if not cfg.factory_enabled and provider != "demo":
+        mode, hint = "disabled", "BOOPANG_FACTORY_ENABLED=true 로 활성화하세요 (Claude 는 ANTHROPIC_API_KEY, Ollama 는 로컬 서버 필요). 키 없이 시연하려면 BOOPANG_FACTORY_DEMO=true."
+    elif provider == "demo":
         mode, hint = "demo", "데모 모드: 요청과 무관한 고정 샘플을 생성합니다."
-    elif not has_cred:
-        mode, hint = "unconfigured", "ANTHROPIC_API_KEY 환경변수가 필요합니다."
+    elif provider == "ollama":
+        model, cost = cfg.ollama_model, "free-local"
+        st = ollama_status(cfg.ollama_host, cfg.ollama_model)
+        if not st["reachable"]:
+            mode, hint = "unconfigured", f"Ollama 서버({cfg.ollama_host})에 연결할 수 없습니다. `ollama serve` 를 실행하세요."
+        elif not st["model_installed"]:
+            mode, hint = "unconfigured", f"모델이 없습니다. `ollama pull {cfg.ollama_model}` 로 받으세요."
+        else:
+            mode, hint = "llm", ""
     else:
-        mode, hint = "llm", ""
-    return {"mode": mode, "model": cfg.llm_model if mode in ("llm", "unconfigured") else None, "hint": hint,
+        model = cfg.llm_model
+        has_cred = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
+        mode, hint = ("llm", "") if has_cred else ("unconfigured", "ANTHROPIC_API_KEY 환경변수가 필요합니다.")
+    return {"mode": mode, "provider": provider, "model": model, "cost": cost, "hint": hint,
+            "exec": cfg.factory_exec, "mcp": cfg.factory_mcp,
             "limits": {"max_files": cfg.factory_max_files, "max_calls": cfg.factory_max_calls,
                        "max_jobs_per_hour": cfg.factory_max_jobs_per_hour}}
 
@@ -162,8 +174,8 @@ def api_factory_status():
 async def api_factory_job(request: str = Form(...)):
     """자연어 요구사항 → 소프트웨어 제작 파이프라인 시작."""
     cfg = Config.from_env()
-    if not cfg.factory_enabled and not cfg.factory_demo:
-        raise HTTPException(403, "소프트웨어 팩토리가 비활성화되어 있습니다. BOOPANG_FACTORY_ENABLED=true 와 ANTHROPIC_API_KEY 를 설정하거나 데모 모드를 켜세요.")
+    if not cfg.factory_enabled and not cfg.demo:
+        raise HTTPException(403, "소프트웨어 팩토리가 비활성화되어 있습니다. BOOPANG_FACTORY_ENABLED=true (Claude: ANTHROPIC_API_KEY / Ollama: BOOPANG_LLM_PROVIDER=ollama)를 설정하거나 데모 모드를 켜세요.")
     if len(request) > 4000:
         raise HTTPException(413, "요구사항은 4000자 이내로 입력하세요.")
     try:

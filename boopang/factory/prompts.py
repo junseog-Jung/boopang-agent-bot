@@ -86,8 +86,8 @@ def prd_user(request: str) -> str:
     return f"User request:\n<request>\n{request}\n</request>"
 
 
-def arch_user(prd: dict, max_files: int) -> str:
-    return f"File-count limit: {max_files} (including tests, excluding README.md).\nPRD:\n{dumps(prd)}"
+def arch_user(prd: dict, max_files: int, exec_note: str = "") -> str:
+    return f"File-count limit: {max_files} (including tests, excluding README.md).\n{exec_note}\nPRD:\n{dumps(prd)}"
 
 
 def interfaces(files: dict, budget: int = 6000) -> str:
@@ -107,16 +107,17 @@ def interfaces(files: dict, budget: int = 6000) -> str:
     return "\n".join(out)
 
 
-def dev_user(prd: dict, arch: dict, path: str, purpose: str, done: dict) -> str:
+def dev_user(prd: dict, arch: dict, path: str, purpose: str, done: dict, exec_note: str = "") -> str:
     brief = {k: arch[k] for k in ("overview", "components", "data_model", "api", "ui_plan", "files", "run_commands")}
     return (f"PRD summary: {prd['title']} — {prd['summary']}\nTech stack: {dumps(prd['tech_stack'])}\n"
             f"Architecture:\n{dumps(brief)}\n\nAlready generated files (interfaces only):\n{interfaces(done) or '(none yet)'}\n\n"
-            f"Write this file now:\npath: {path}\npurpose: {purpose}")
+            f"{exec_note}\nWrite this file now:\npath: {path}\npurpose: {purpose}")
 
 
 def refine_user(findings: list, files: dict, affected: list) -> str:
     return dumps({
         "findings": [f"{f.path}:{f.line} [{f.code}] {f.message}" for f in findings],
+        "test_output": [f.detail for f in findings if f.detail][:2],
         "project_files": sorted(files),
         "files": {p: files[p] for p in affected},
     })
