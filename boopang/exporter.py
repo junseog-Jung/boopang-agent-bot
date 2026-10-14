@@ -1,4 +1,7 @@
-"""물류 DB(WMS) 연동 포맷 출력 — CSV / JSON / XLSX 리포트."""
+"""물류 DB(WMS) 연동 포맷 출력 — CSV / JSON / XLSX 리포트.
+
+내부 표준 레코드(canon_*)를 만든 뒤 schema(schema_config.json)에 따라 컬럼명·순서·상수·상태코드를 매핑한다.
+"""
 from __future__ import annotations
 
 import csv
@@ -6,19 +9,17 @@ import io
 import json
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Optional
 
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
+from .config import Config
 from .models import STATUS_LABELS, Line, Order, Result, Status
+from .schema import Schema, load_schema
 
-SCHEMA_VERSION = "1.0"
-WMS_COLUMNS = [
-    "ORDER_NO", "LINE_NO", "SKU", "ITEM_NAME", "ORD_QTY", "RCV_QTY", "UNIT_PRICE", "DISC_RATE",
-    "SUPPLY_AMT", "VAT_AMT", "TOTAL_AMT", "STATUS_CD", "RECIPIENT", "TEL", "ADDR", "SHIP_DT",
-    "TRACKING_NO", "ISSUE_CNT",
-]
+PREVIEW_VERSION = "1.0"  # UI 미리보기 응답 형식 버전 (WMS 스키마와 무관)
 _DANGEROUS_PREFIX = ("=", "+", "-", "@", "\t", "\r")
 
 
@@ -29,74 +30,122 @@ def safe_cell(value):
     return value
 
 
+def default_schema() -> Schema:
+    return load_schema(Config.from_env().schema_file or None)
+
+
 def _money(d: Decimal) -> str:
     return str(d.quantize(Decimal("1")))
 
 
-def line_record(l: Line) -> dict:
-    """WMS 라인 레코드 (문자열 값은 원본 그대로, 정리는 출력 단계에서)."""
+def canon_line(l: Line, date_format: str = "%Y-%m-%d") -> dict:
+    """내부 표준 라인 레코드. 키는 schema 의 source 이름과 동일."""
     return {
-        "ORDER_NO": l.order_id,
-        "LINE_NO": l.line_no,
-        "SKU": l.sku,
-        "ITEM_NAME": l.name,
-        "ORD_QTY": l.qty_ordered if l.qty_ordered is not None else "",
-        "RCV_QTY": l.qty_received if l.qty_received is not None else "",
-        "UNIT_PRICE": _money(l.unit_price) if l.unit_price is not None else "",
-        "DISC_RATE": format((l.discount_rate * 100).normalize(), "f") if l.discount_rate else "0",
-        "SUPPLY_AMT": _money(l.supply_amt),
-        "VAT_AMT": _money(l.vat_amt),
-        "TOTAL_AMT": _money(l.total_amt),
-        "STATUS_CD": l.status.value,
-        "RECIPIENT": l.recipient,
-        "TEL": l.phone,
-        "ADDR": l.address,
-        "SHIP_DT": l.ship_date.isoformat() if l.ship_date else "",
-        "TRACKING_NO": l.tracking_no,
-        "ISSUE_CNT": l.issue_count,
+        "order_id": l.order_id,
+        "line_no": l.line_no,
+        "sku": l.sku,
+        "name": l.name,
+        "qty_ordered": l.qty_ordered if l.qty_ordered is not None else "",
+        "qty_received": l.qty_received if l.qty_received is not None else "",
+        "unit_price": _money(l.unit_price) if l.unit_price is not None else "",
+        "discount_pct": format((l.discount_rate * 100).normalize(), "f") if l.discount_rate else "0",
+        "supply_amt": _money(l.supply_amt),
+        "vat_amt": _money(l.vat_amt),
+        "total_amt": _money(l.total_amt),
+        "status": l.status.value,
+        "status_label": STATUS_LABELS[l.status],
+        "recipient": l.recipient,
+        "phone": l.phone,
+        "address": l.address,
+        "ship_date": l.ship_date.strftime(date_format) if l.ship_date else "",
+        "tracking_no": l.tracking_no,
+        "issue_count": l.issue_count,
     }
 
 
-def order_record(o: Order) -> dict:
+def canon_order(o: Order) -> dict:
     return {
-        "ORDER_NO": o.order_id,
-        "STATUS_CD": o.status.value,
-        "STATUS_LABEL": STATUS_LABELS[o.status],
-        "LINE_CNT": len(o.lines),
-        "SUPPLY_AMT": _money(o.supply_amt),
-        "VAT_AMT": _money(o.vat_amt),
-        "SHIPPING_FEE": _money(o.shipping_fee),
-        "TOTAL_AMT": _money(o.total_amt),
+        "order_id": o.order_id,
+        "status": o.status.value,
+        "status_label": STATUS_LABELS[o.status],
+        "line_count": len(o.lines),
+        "supply_amt": _money(o.supply_amt),
+        "vat_amt": _money(o.vat_amt),
+        "shipping_fee": _money(o.shipping_fee),
+        "total_amt": _money(o.total_amt),
     }
 
 
-def to_csv(result: Result) -> bytes:
-    """WMS 라인 CSV (UTF-8 BOM — 엑셀 호환)."""
+def _map(canon: dict, columns: tuple, status_codes: dict) -> dict:
+    out = {}
+    for c in columns:
+        if c.source is None:
+            out[c.name] = c.value
+        elif c.source == "status":
+            out[c.name] = status_codes[canon["status"]]
+        else:
+            out[c.name] = canon[c.source]
+    return out
+
+
+def line_rows(result: Result, schema: Schema) -> list:
+    return [_map(canon_line(l, schema.date_format), schema.line_columns, schema.status_codes) for l in result.lines]
+
+
+def order_rows(result: Result, schema: Schema) -> list:
+    return [_map(canon_order(o), schema.order_columns, schema.status_codes) for o in result.orders]
+
+
+def to_csv(result: Result, schema: Optional[Schema] = None) -> bytes:
+    """WMS 라인 CSV. 구분자/인코딩은 스키마 설정(기본: , / UTF-8 BOM)."""
+    schema = schema or default_schema()
     buf = io.StringIO(newline="")
-    w = csv.DictWriter(buf, fieldnames=WMS_COLUMNS, lineterminator="\r\n")
+    w = csv.DictWriter(buf, fieldnames=[c.name for c in schema.line_columns],
+                       delimiter=schema.delimiter, lineterminator="\r\n")
     w.writeheader()
-    for l in result.lines:
-        rec = {k: safe_cell(v) for k, v in line_record(l).items()}
-        w.writerow(rec)
-    return buf.getvalue().encode("utf-8-sig")
+    for row in line_rows(result, schema):
+        w.writerow({k: safe_cell(v) for k, v in row.items()})
+    return buf.getvalue().encode(schema.encoding)  # 표현 불가 문자는 UnicodeEncodeError (조용히 깨뜨리지 않음)
 
 
-def to_dict(result: Result) -> dict:
+def to_preview(result: Result) -> dict:
+    """웹 UI/미리보기용 — 스키마와 무관한 고정 키(내부 표준 필드명)."""
     return {
-        "schema_version": SCHEMA_VERSION,
+        "schema_version": PREVIEW_VERSION,
+        "summary": result.summary(),
+        "orders": [dict(canon_order(o), lines=[canon_line(l) for l in o.lines]) for o in result.orders],
+        "issues": _issues(result),
+    }
+
+
+def _issues(result: Result) -> list:
+    return [
+        {"row": i.row_no, "severity": i.severity.value, "code": i.code, "message": i.message,
+         "order_id": i.order_id, "sku": i.sku}
+        for i in result.issues
+    ]
+
+
+def to_dict(result: Result, schema: Optional[Schema] = None) -> dict:
+    """WMS JSON — 스키마에 따라 컬럼명이 매핑된 주문(라인 중첩) 구조."""
+    schema = schema or default_schema()
+    orders = []
+    for o in result.orders:
+        rec = _map(canon_order(o), schema.order_columns, schema.status_codes)
+        rec["lines"] = [_map(canon_line(l, schema.date_format), schema.line_columns, schema.status_codes)
+                        for l in o.lines]
+        orders.append(rec)
+    return {
+        "schema_version": schema.version,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "summary": result.summary(),
-        "orders": [dict(order_record(o), lines=[line_record(l) for l in o.lines]) for o in result.orders],
-        "issues": [
-            {"row": i.row_no, "severity": i.severity.value, "code": i.code, "message": i.message,
-             "order_id": i.order_id, "sku": i.sku}
-            for i in result.issues
-        ],
+        "orders": orders,
+        "issues": _issues(result),
     }
 
 
-def to_json(result: Result) -> bytes:
-    return json.dumps(to_dict(result), ensure_ascii=False, indent=2).encode("utf-8")
+def to_json(result: Result, schema: Optional[Schema] = None) -> bytes:
+    return json.dumps(to_dict(result, schema), ensure_ascii=False, indent=2).encode("utf-8")
 
 
 def _write_sheet(ws, headers: list, rows: list) -> None:
@@ -111,7 +160,8 @@ def _write_sheet(ws, headers: list, rows: list) -> None:
     ws.freeze_panes = "A2"
 
 
-def to_xlsx(result: Result) -> bytes:
+def to_xlsx(result: Result, schema: Optional[Schema] = None) -> bytes:
+    schema = schema or default_schema()
     wb = Workbook()
     ws = wb.active
     ws.title = "요약"
@@ -127,15 +177,14 @@ def to_xlsx(result: Result) -> bytes:
     _write_sheet(ws, ["항목", "값"], summary_rows)
 
     ow = wb.create_sheet("주문")
-    orders = [order_record(o) for o in result.orders]
-    _write_sheet(ow, list(orders[0].keys()), [list(r.values()) for r in orders]) if orders else None
+    _write_sheet(ow, [c.name for c in schema.order_columns], [list(r.values()) for r in order_rows(result, schema)])
 
     lw = wb.create_sheet("WMS라인")
-    _write_sheet(lw, WMS_COLUMNS, [[line_record(l)[c] for c in WMS_COLUMNS] for l in result.lines])
+    _write_sheet(lw, [c.name for c in schema.line_columns], [list(r.values()) for r in line_rows(result, schema)])
 
     iw = wb.create_sheet("검수이슈")
-    order = {"ERROR": 0, "WARN": 1, "INFO": 2}
-    issues = sorted(result.issues, key=lambda i: (order[i.severity.value], i.row_no))
+    rank = {"ERROR": 0, "WARN": 1, "INFO": 2}
+    issues = sorted(result.issues, key=lambda i: (rank[i.severity.value], i.row_no))
     _write_sheet(iw, ["행", "심각도", "코드", "메시지", "주문번호", "SKU"],
                  [[i.row_no, i.severity.value, i.code, i.message, i.order_id, i.sku] for i in issues])
 

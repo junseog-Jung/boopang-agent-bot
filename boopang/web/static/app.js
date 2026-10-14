@@ -37,8 +37,8 @@
       card("배송비", won(s.shipping_fee)), card("총 합계", won(s.total_amt)));
     $("badges").replaceChildren(...Object.entries(s.order_status).map(([k, v]) => el("span", `${LABELS[k]} ${v}`, "badge s-" + k)));
     table("orders", ["주문번호", "상태", "라인", "공급가", "부가세", "배송비", "합계"],
-      d.orders.map((o) => [{text:o.ORDER_NO}, {text:LABELS[o.STATUS_CD], cls:"badge s-" + o.STATUS_CD}, {text:o.LINE_CNT},
-        {text:won(o.SUPPLY_AMT)}, {text:won(o.VAT_AMT)}, {text:won(o.SHIPPING_FEE)}, {text:won(o.TOTAL_AMT)}]), [2,3,4,5,6]);
+      d.orders.map((o) => [{text:o.order_id}, {text:LABELS[o.status], cls:"badge s-" + o.status}, {text:o.line_count},
+        {text:won(o.supply_amt)}, {text:won(o.vat_amt)}, {text:won(o.shipping_fee)}, {text:won(o.total_amt)}]), [2,3,4,5,6]);
     const rank = {ERROR:0, WARN:1, INFO:2};
     const issues = [...d.issues].sort((a, b) => rank[a.severity] - rank[b.severity] || a.row - b.row);
     table("issues", ["행", "심각도", "코드", "메시지", "주문번호", "SKU"],

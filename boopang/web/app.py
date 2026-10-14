@@ -8,9 +8,10 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 
 from .. import __version__
 from ..config import Config
-from ..exporter import to_csv, to_dict, to_json, to_xlsx
+from ..exporter import default_schema, to_csv, to_json, to_preview, to_xlsx
 from ..models import ParseError
 from ..pipeline import process
+from ..schema import SchemaError, load_schema
 from ..sample import sample_xlsx
 
 STATIC = Path(__file__).parent / "static"
@@ -24,6 +25,10 @@ CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
     "object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
 )
+
+# 잘못된 환경변수/스키마 파일이면 기동 시점에 바로 실패시킨다 (fail-fast)
+Config.from_env()
+default_schema()
 
 app = FastAPI(title="부팡 물류 및 주문 처리 자동화 봇", version=__version__, docs_url="/api/docs", redoc_url=None)
 
@@ -90,7 +95,7 @@ def sample():
 async def api_process(file: UploadFile = File(...)):
     cfg = Config.from_env()
     content, name = await _read_upload(file, cfg)
-    return JSONResponse(to_dict(_run(content, name, cfg)))
+    return JSONResponse(to_preview(_run(content, name, cfg)))
 
 
 @app.post("/api/convert")
@@ -100,5 +105,11 @@ async def api_convert(file: UploadFile = File(...), format: str = Query("csv")):
     cfg = Config.from_env()
     content, name = await _read_upload(file, cfg)
     media, out_name, fn = FORMATS[format]
-    return Response(fn(_run(content, name, cfg)), media_type=media,
-                    headers={"Content-Disposition": f'attachment; filename="{out_name}"'})
+    result = _run(content, name, cfg)
+    try:
+        body = fn(result, load_schema(cfg.schema_file or None))
+    except SchemaError as exc:
+        raise HTTPException(500, "서버의 WMS 스키마 설정이 올바르지 않습니다.") from exc
+    except UnicodeEncodeError as exc:
+        raise HTTPException(422, "스키마의 출력 인코딩으로 표현할 수 없는 문자가 포함되어 있습니다.") from exc
+    return Response(body, media_type=media, headers={"Content-Disposition": f'attachment; filename="{out_name}"'})

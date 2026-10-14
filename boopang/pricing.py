@@ -14,9 +14,9 @@ def _won(v: Decimal) -> Decimal:
     return v.quantize(ONE, rounding=ROUND_HALF_UP)
 
 
-def billable_qty(line: Line) -> int:
-    """청구 수량: 검수수량(주문수량 상한), 미검수면 주문수량."""
-    if line.qty_received is None:
+def billable_qty(line: Line, cfg: Config) -> int:
+    """청구 수량. received: 검수수량(주문수량 상한, 미검수면 주문수량) / ordered: 주문수량."""
+    if cfg.bill_basis == "ordered" or line.qty_received is None:
         return line.qty_ordered
     return min(line.qty_received, line.qty_ordered)
 
@@ -26,14 +26,15 @@ def price_line(line: Line, cfg: Config) -> None:
     if not line.billable:
         line.supply_amt = line.vat_amt = line.total_amt = Decimal("0")
         return
-    gross = Decimal(billable_qty(line)) * line.unit_price * (Decimal("1") - line.discount_rate)
+    gross = Decimal(billable_qty(line, cfg)) * line.unit_price * (Decimal("1") - line.discount_rate)
+    rate = cfg.effective_vat_rate
     if cfg.price_includes_vat:
         total = _won(gross)
-        supply = _won(total / (Decimal("1") + cfg.vat_rate))
+        supply = _won(total / (Decimal("1") + rate))
         vat = total - supply
     else:
         supply = _won(gross)
-        vat = _won(supply * cfg.vat_rate)
+        vat = _won(supply * rate)
         total = supply + vat
     line.supply_amt, line.vat_amt, line.total_amt = supply, vat, total
 
