@@ -13,7 +13,7 @@ from .checks import ERROR, INFO, WARN, Finding, qa_check, security_scan
 from .llm import BaseLLM, LLMBudgetError, LLMError
 from .mcp_workspace import McpToolError, McpWorkspace
 from .project import Project, ProjectError, slugify, validate_path
-from .workspace_tools import SANDBOX_PACKAGES
+from .workspace_tools import SANDBOX_PACKAGES, exec_readiness
 
 log = logging.getLogger("boopang.factory")
 MIN_REQUEST = 10
@@ -179,6 +179,12 @@ async def _pipeline(r: Runner, llm: BaseLLM, ws, ws_error: str = "") -> None:
         await r.say("ceo", "⚠ 테스트 실행 모드 local: 생성된 코드를 이 서버에서 격리 없이 실행합니다. 신뢰할 수 있는 로컬 개발 환경에서만 사용하세요.", "warn")
     elif cfg.factory_exec == "docker":
         await r.say("ceo", "테스트는 네트워크 차단 Docker 샌드박스에서 실행됩니다")
+    elif cfg.factory_exec == "modal":
+        await r.say("ceo", "테스트는 Modal 클라우드 샌드박스(네트워크 차단·호스트 환경변수/시크릿 미전달)에서 실행됩니다. Modal 사용량 요금이 발생할 수 있습니다.")
+    if cfg.factory_exec in ("docker", "modal"):
+        ok, hint = exec_readiness(cfg)
+        if not ok:
+            await r.say("ceo", f"테스트 실행 환경이 준비되지 않았습니다: {hint}", "warn")
     await r.state("ceo", "reviewing", "단계 진행 모니터링")
 
     # 2. Ideation — PRD
@@ -383,7 +389,13 @@ async def _run_tests(r: Runner, project: Project, ws, exec_info: dict) -> list:
         await r.say("qa", "테스트 파일이 없어 pytest 를 실행하지 않습니다", "warn")
         return [Finding("(project)", 0, WARN, "NO_TESTS", "자동화 테스트가 없습니다", "qa")]
     await r.state("qa", "reviewing", "pytest 실행 (MCP run_command)")
-    res = await ws.run("pytest -q")
+    try:
+        res = await ws.run("pytest -q")
+    except McpToolError as exc:  # 실행 환경 문제(자격 증명/이미지 등)는 코드 수정으로 해결할 수 없으므로 경고로 처리
+        msg = str(exc).split(": ", 1)[-1][:200]
+        exec_info["summary"] = f"실행 불가: {msg}"
+        await r.say("qa", f"테스트를 실행하지 못했습니다 — {msg}", "error")
+        return [Finding("(project)", 0, WARN, "TEST_EXEC_UNAVAILABLE", f"테스트 실행 환경 문제: {msg}", "qa")]
     exec_info["runs"] += 1
     if res.get("skipped"):
         await r.say("qa", res.get("stderr") or "테스트 실행이 건너뛰어졌습니다")

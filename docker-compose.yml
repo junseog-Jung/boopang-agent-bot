@@ -27,7 +27,11 @@ services:
       BOOPANG_OLLAMA_HOST: "${BOOPANG_OLLAMA_HOST:-http://host.docker.internal:11434}"
       BOOPANG_OLLAMA_MODEL: "${BOOPANG_OLLAMA_MODEL:-qwen2.5-coder:7b-instruct}"
       BOOPANG_FACTORY_MCP: "true"
-      BOOPANG_FACTORY_EXEC: "off"        # 컨테이너 안에서는 생성 코드를 실행하지 않는다 (docker/local 모드는 호스트 실행 전용)
+      # 테스트 실행 모드: off(기본) | modal(클라우드 격리 샌드박스, 이 컨테이너에서도 사용 가능)
+      #  - docker 는 호스트 도커 소켓이 필요하고 local 은 비격리라 컨테이너에서는 사용하지 마세요
+      BOOPANG_FACTORY_EXEC: "${BOOPANG_FACTORY_EXEC:-off}"
+      MODAL_TOKEN_ID: "${MODAL_TOKEN_ID:-}"            # modal 모드에서만 필요 (MCP 서버 프로세스에만 전달되고 샌드박스로는 전달되지 않음)
+      MODAL_TOKEN_SECRET: "${MODAL_TOKEN_SECRET:-}"
       # 실제 WMS 스키마를 쓰려면 아래 두 줄과 volumes 의 주석을 함께 해제
       # BOOPANG_SCHEMA_FILE: /config/schema_config.json
     # volumes:

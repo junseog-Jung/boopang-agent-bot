@@ -17,6 +17,23 @@ from pathlib import Path
 from ..config import Config
 
 
+def server_env(cfg: Config) -> dict:
+    """MCP 서버 프로세스 환경. API 키 등 서버 시크릿은 어떤 모드에서도 넘기지 않는다.
+    modal 모드에서만 Modal 클라이언트 인증/네트워크 변수를 추가한다 (생성 코드는 이 프로세스에서 실행되지 않는다)."""
+    from .modal_runner import CLIENT_ENV_PASSTHROUGH
+
+    env = {
+        "PATH": os.environ.get("PATH", ""), "PYTHONDONTWRITEBYTECODE": "1",
+        "BOOPANG_FACTORY_EXEC": cfg.factory_exec, "BOOPANG_SANDBOX_IMAGE": cfg.sandbox_image, "BOOPANG_EXEC_TIMEOUT": str(cfg.exec_timeout),
+        "BOOPANG_FACTORY_MAX_FILES": str(cfg.factory_max_files), "BOOPANG_FACTORY_MAX_FILE_BYTES": str(cfg.factory_max_file_bytes),
+        "BOOPANG_FACTORY_MAX_TOTAL_BYTES": str(cfg.factory_max_total_bytes),
+        "BOOPANG_MODAL_APP": cfg.modal_app, "BOOPANG_MODAL_CPU": str(cfg.modal_cpu), "BOOPANG_MODAL_MEMORY": str(cfg.modal_memory),
+    }
+    if cfg.factory_exec == "modal":
+        env.update({k: os.environ[k] for k in CLIENT_ENV_PASSTHROUGH if os.environ.get(k)})
+    return env
+
+
 class McpToolError(RuntimeError):
     """MCP 도구가 오류를 반환했을 때 (메시지는 서버가 만든 안전한 문장)."""
 
@@ -39,13 +56,7 @@ class McpWorkspace:
         os.chmod(base, 0o700)
         self.root = Path(tempfile.mkdtemp(prefix="job-", dir=base))
         os.chmod(self.root, 0o777 if self.cfg.factory_exec == "docker" else 0o700)
-        c = self.cfg
-        env = {  # 서버 프로세스에는 필요한 설정만 전달한다 (API 키 등은 넘기지 않음)
-            "PATH": os.environ.get("PATH", ""), "PYTHONDONTWRITEBYTECODE": "1",
-            "BOOPANG_FACTORY_EXEC": c.factory_exec, "BOOPANG_SANDBOX_IMAGE": c.sandbox_image, "BOOPANG_EXEC_TIMEOUT": str(c.exec_timeout),
-            "BOOPANG_FACTORY_MAX_FILES": str(c.factory_max_files), "BOOPANG_FACTORY_MAX_FILE_BYTES": str(c.factory_max_file_bytes),
-            "BOOPANG_FACTORY_MAX_TOTAL_BYTES": str(c.factory_max_total_bytes),
-        }
+        env = server_env(self.cfg)
         params = StdioServerParameters(command=sys.executable, args=["-m", "boopang.mcp_server", "--root", str(self.root)], env=env,
                                        cwd=str(Path(__file__).resolve().parents[2]))
         self._stack = AsyncExitStack()

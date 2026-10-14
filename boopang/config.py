@@ -7,7 +7,7 @@ from decimal import Decimal, InvalidOperation
 
 BILL_BASES = ("received", "ordered")
 PROVIDERS = ("anthropic", "ollama", "demo")
-EXEC_MODES = ("off", "docker", "local")
+EXEC_MODES = ("off", "docker", "modal", "local")
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -44,6 +44,13 @@ def _env_float(name: str, default: float) -> float:
     if v != v or v in (float("inf"), float("-inf")):
         raise ValueError(f"{name}: 유한한 숫자여야 합니다 (현재 값: {raw!r})")
     return v
+
+
+def _default_max_files() -> int:
+    """공급자별 기본 파일 수 상한: 작은 로컬 모델은 컨텍스트(8K)와 품질 때문에 적게, 대형 모델은 넉넉하게."""
+    if _env_bool("BOOPANG_FACTORY_DEMO", False):
+        return 25
+    return 10 if os.environ.get("BOOPANG_LLM_PROVIDER", "anthropic").strip().lower() == "ollama" else 25
 
 
 def _normalize_host(raw: str) -> str:
@@ -90,9 +97,12 @@ class Config:
     ollama_timeout: float = 600.0            # CPU 추론은 느리므로 넉넉히 (초)
     ollama_num_ctx: int = 8192               # Ollama 기본 컨텍스트(2~4K)는 코드 생성에 너무 작다
     factory_mcp: bool = True                 # 파일 기록/조회/실행을 MCP 서버(stdio) 경유로 수행
-    factory_exec: str = "off"                # 생성 코드 테스트 실행: off | docker(격리) | local(비격리, 위험)
+    factory_exec: str = "off"                # 생성 코드 테스트 실행: off | docker | modal(클라우드 격리) | local(비격리, 위험)
     sandbox_image: str = "boopang-sandbox"
     exec_timeout: int = 60
+    modal_app: str = "boopang-factory"       # Modal 앱 이름 (modal 실행 모드)
+    modal_cpu: float = 1.0
+    modal_memory: int = 1024                 # MiB
     workspace_dir: str = ""                  # 비우면 시스템 임시 폴더 아래 boopang-workspaces
     step_delay: float = 0.4                  # 관제 대시보드 단계 간 연출 지연(초). 처리 결과와 무관, 0 이면 즉시
 
@@ -115,6 +125,8 @@ class Config:
             raise ValueError("BOOPANG_OLLAMA_MODEL: 비어 있을 수 없습니다")
         if not (1 <= self.ollama_timeout <= 3600) or not (2048 <= self.ollama_num_ctx <= 131072):
             raise ValueError("BOOPANG_OLLAMA_TIMEOUT(1~3600초) / BOOPANG_OLLAMA_NUM_CTX(2048~131072) 범위를 확인하세요")
+        if not self.modal_app.strip() or not (0.25 <= self.modal_cpu <= 8) or not (256 <= self.modal_memory <= 8192):
+            raise ValueError("BOOPANG_MODAL_APP 비어 있음 / BOOPANG_MODAL_CPU(0.25~8) / BOOPANG_MODAL_MEMORY(256~8192 MiB) 범위를 확인하세요")
         if not (5 <= self.exec_timeout <= 300):
             raise ValueError("BOOPANG_EXEC_TIMEOUT: 5~300초 사이여야 합니다")
         if not self.llm_model.strip():
@@ -154,7 +166,7 @@ class Config:
             factory_demo=_env_bool("BOOPANG_FACTORY_DEMO", False),
             llm_model=os.environ.get("BOOPANG_LLM_MODEL", "claude-opus-5-5").strip() or "claude-opus-5-5",
             llm_effort=os.environ.get("BOOPANG_LLM_EFFORT", "medium").strip().lower() or "medium",
-            factory_max_files=_env_int("BOOPANG_FACTORY_MAX_FILES", 25),
+            factory_max_files=_env_int("BOOPANG_FACTORY_MAX_FILES", _default_max_files()),
             factory_max_file_bytes=_env_int("BOOPANG_FACTORY_MAX_FILE_BYTES", 60_000),
             factory_max_total_bytes=_env_int("BOOPANG_FACTORY_MAX_TOTAL_BYTES", 400_000),
             factory_max_calls=_env_int("BOOPANG_FACTORY_MAX_CALLS", 40),
@@ -169,5 +181,8 @@ class Config:
             factory_exec=os.environ.get("BOOPANG_FACTORY_EXEC", "off").strip().lower() or "off",
             sandbox_image=os.environ.get("BOOPANG_SANDBOX_IMAGE", "boopang-sandbox").strip() or "boopang-sandbox",
             exec_timeout=_env_int("BOOPANG_EXEC_TIMEOUT", 60),
+            modal_app=os.environ.get("BOOPANG_MODAL_APP", "boopang-factory").strip() or "boopang-factory",
+            modal_cpu=_env_float("BOOPANG_MODAL_CPU", 1.0),
+            modal_memory=_env_int("BOOPANG_MODAL_MEMORY", 1024),
             workspace_dir=os.environ.get("BOOPANG_WORKSPACE_DIR", "").strip(),
         )

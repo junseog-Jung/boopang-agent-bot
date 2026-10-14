@@ -83,7 +83,7 @@ uvicorn boopang.web.app:app --host 127.0.0.1 --port 8899
 | ANTHROPIC_API_KEY | — | Claude API 키 (환경변수로만 읽고 로그·응답에 쓰지 않음) |
 | BOOPANG_LLM_MODEL | claude-opus-5-5 | 사용할 Claude 모델 |
 | BOOPANG_LLM_EFFORT | medium | low / medium / high / xhigh / max |
-| BOOPANG_FACTORY_MAX_FILES | 25 | 프로젝트당 최대 파일 수 |
+| BOOPANG_FACTORY_MAX_FILES | 25 (Ollama 는 10) | 프로젝트당 최대 파일 수 |
 | BOOPANG_FACTORY_MAX_FILE_BYTES | 60000 | 파일당 최대 크기 |
 | BOOPANG_FACTORY_MAX_TOTAL_BYTES | 400000 | 프로젝트 전체 최대 크기 |
 | BOOPANG_FACTORY_MAX_CALLS | 40 | 작업 1건당 LLM 호출 상한 (설계가 이보다 크면 시작 전에 거절) |
@@ -97,9 +97,11 @@ ollama pull qwen2.5-coder:7b-instruct            # 또는 deepseek-coder 등
 export BOOPANG_FACTORY_ENABLED=true BOOPANG_LLM_PROVIDER=ollama
 uvicorn boopang.web.app:app --host 127.0.0.1 --port 8899
 ```
-- 구조화 출력(`format` JSON 스키마)을 사용하므로 **Ollama 0.5 이상**이 필요합니다. 형식을 어기면 1회 교정 재시도합니다.
+- 구조화 출력(`format` JSON 스키마)을 사용하므로 **Ollama 0.5 이상**이 필요합니다.
+- **형식 이탈 방어**: ① ```json 펜스/앞뒤 설명이 붙어도 JSON 을 추출 ② 필수 키뿐 아니라 **타입·enum 까지 스키마 검사**(예: `content` 가 숫자) ③ 위반 시 무엇이 틀렸는지 알려 주며 **1회 교정 재시도**(재시도도 호출 예산에 포함) ④ 그래도 실패하면 원인과 함께 명확히 중단.
+- **컨텍스트 보호**: 출력 상한(`num_predict`)을 컨텍스트의 절반 이하로 제한하고, 프롬프트가 컨텍스트에 비해 너무 크면 **호출 전에 오류**로 알립니다(Ollama 는 넘치면 프롬프트 앞부분을 조용히 버려 시스템 프롬프트가 사라질 수 있음). 응답의 `prompt_eval_count` 로 잘림도 재확인합니다. `keep_alive` 15분으로 호출 사이 모델 재로딩을 막습니다.
 - 기본 컨텍스트(`num_ctx`)는 8192로 올려서 호출합니다 (Ollama 기본값은 코드 생성에 너무 작습니다). CPU 추론은 느려서 타임아웃 기본값이 600초입니다.
-- **작은 모델(7B)은 품질이 낮습니다.** 파일 수를 줄이고(`BOOPANG_FACTORY_MAX_FILES=8` 등) 요구사항을 작게 시작하세요. 자가 치유 루프가 일부를 보완하지만 한계가 있습니다. 가능하면 14B 이상을 권장합니다.
+- **작은 모델(7B)은 품질이 낮습니다.** Ollama 공급자에서는 `BOOPANG_FACTORY_MAX_FILES` 기본값이 **10**입니다(Claude 25, 직접 지정하면 그 값). 요구사항을 작게 시작하세요. 자가 치유 루프가 일부를 보완하지만 한계가 있습니다. 가능하면 14B 이상을 권장합니다.
 - Docker compose 에서 호스트의 Ollama 에 연결하려면 호스트에서 `OLLAMA_HOST=0.0.0.0 ollama serve` 로 띄우세요 (`host.docker.internal` 사용).
 
 | 변수 | 기본값 | 설명 |
@@ -123,14 +125,27 @@ uvicorn boopang.web.app:app --host 127.0.0.1 --port 8899
 > `mcp` 패키지는 2.x 에서 `FastMCP` 가 `MCPServer` 로 바뀌어 `from mcp.server.fastmcp import FastMCP` 가 깨지므로 `mcp>=1.9,<2` 로 고정했습니다.
 > MCP 서버를 못 띄우면(미설치 등) 경고를 표시하고 메모리 모드로 계속합니다. `BOOPANG_FACTORY_MCP=false` 로 끌 수 있습니다.
 
-### 🧪 테스트 실행 모드 (`BOOPANG_FACTORY_EXEC`)
+### 🧪 테스트 실행 모드 (`BOOPANG_FACTORY_EXEC`: off / docker / modal / local)
 | 값 | 동작 |
 |----|------|
 | `off` (기본) | 생성된 테스트를 **실행하지 않음** (문법 검사·정적 보안 스캔만) |
 | `docker` | 생성된 `pytest` 를 **네트워크 차단·비루트·읽기 전용 루트·메모리/CPU/PID 제한** Docker 컨테이너에서 실행. 먼저 `deploy/build_sandbox.sh` 로 `boopang-sandbox` 이미지를 빌드. 컨테이너에 네트워크가 없으므로 이미지에 설치된 패키지(pytest, fastapi, httpx, uvicorn, pydantic, flask, requests, jinja2, sqlalchemy)만 쓸 수 있고, 설계 프롬프트가 이 목록을 모델에 알려줍니다 |
+| `modal` | 생성된 `pytest` 를 **[Modal](https://modal.com) 클라우드 서버리스 샌드박스**(`Sandbox`, 네트워크 차단)에서 실행. 내 서버/PC 에는 Docker 도 필요 없고, 컨테이너 배포(compose)에서도 쓸 수 있습니다. **Modal 계정이 필요하고 사용량 요금이 발생할 수 있습니다.** 아래 *Modal 모드* 참고 |
 | `local` | **⚠ 격리 없이** 이 서버 프로세스 권한으로 실행(CPU/메모리/파일 크기 rlimit, 환경변수 제거, 타임아웃 시 프로세스 그룹 강제 종료만 적용). 생성된 코드는 네트워크와 파일 시스템에 접근할 수 있으므로 **신뢰할 수 있는 로컬 개발 PC 에서만** 쓰세요 |
 
 실행 결과(통과/실패와 출력)는 QA 의 발견 사항이 되어 **자가 치유 루프로 되돌아갑니다**(최대 3회). `docker`/`local` 은 호스트에서 직접 uvicorn 을 띄울 때 쓰며, 제공된 docker compose(읽기 전용·소켓 없음)에서는 `off` 로 고정되어 있습니다. 환경변수 `BOOPANG_SANDBOX_IMAGE`, `BOOPANG_EXEC_TIMEOUT`(기본 60초), `BOOPANG_WORKSPACE_DIR`.
+
+#### ☁️ Modal 모드 (`BOOPANG_FACTORY_EXEC=modal`)
+```bash
+pip install modal && modal token set          # 또는 MODAL_TOKEN_ID / MODAL_TOKEN_SECRET 환경변수
+export BOOPANG_FACTORY_ENABLED=true BOOPANG_FACTORY_EXEC=modal
+uvicorn boopang.web.app:app --host 127.0.0.1 --port 8899
+```
+- 흐름: 검증된 워크스페이스 파일 → **tar 한 개로 샌드박스에 업로드** → `python -m pytest -q …`(허용 목록을 통과한 인자만) 실행 → stdout/stderr/종료 코드 수집 → 기존 QA 자가 치유 루프로 피드백 → 샌드박스 **항상 종료**. 실행마다 새 샌드박스를 씁니다.
+- **누출 차단**: `block_network=True`, `Sandbox.create` 에 `secrets`/`env`/`volumes` 를 넘기지 않고 exec 환경변수는 상수 3개(`PYTHONPATH`, `PYTHONDONTWRITEBYTECODE`, `HOME`)뿐입니다. 호스트의 API 키·Modal 토큰은 샌드박스로 가지 않습니다(테스트로 고정). Modal 토큰은 **MCP 서버 프로세스에만** 전달되며(modal 모드일 때만) 생성 코드는 그 프로세스에서 실행되지 않습니다.
+- 패키지: 이미지 빌드 시 **고정 목록**(pytest, fastapi, httpx, uvicorn, pydantic, flask, requests, jinja2, sqlalchemy)만 설치합니다. 생성된 `requirements.txt` 는 설치하지 않으므로(공급망 위험 차단) 목록 밖 패키지를 import 하면 테스트가 실패하고 자가 치유가 수정합니다. 첫 실행은 이미지 빌드로 느리고 이후는 캐시됩니다.
+- 설정: `BOOPANG_MODAL_APP`(기본 boopang-factory), `BOOPANG_MODAL_CPU`(1.0), `BOOPANG_MODAL_MEMORY`(1024 MiB), `BOOPANG_EXEC_TIMEOUT`(60초). 자격 증명이 없으면 상태 화면과 로그에 안내가 나오고, 작업은 **정적 점검만으로 계속** 진행됩니다(테스트 실행 환경 문제는 코드 수정으로 해결되지 않으므로 실패로 처리하지 않음).
+- 실제 클라우드 연동 테스트: `BOOPANG_TEST_MODAL=1 pytest tests/test_modal_tuning.py -k live` (요금 발생 가능).
 
 ### 안전장치
 - 생성된 코드는 **기본적으로 서버에서 실행하지 않습니다.** 문법·정적 보안 점검만 합니다. (테스트 실행은 아래 *테스트 실행 모드*에서 명시적으로 켠 경우에만)

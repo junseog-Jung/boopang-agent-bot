@@ -20,6 +20,7 @@ import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import modal_runner
 from .project import ALLOWED_EXT, ALLOWED_NAMES, BLOCKED_PARTS, validate_path, ProjectError
 
 OUTPUT_LIMIT = 8000
@@ -46,12 +47,13 @@ def _tail(text: str) -> str:
 
 class Workspace:
     def __init__(self, root, *, limits: Limits | None = None, exec_mode: str = "off", sandbox_image: str = "boopang-sandbox",
-                 exec_timeout: int = 60):
+                 exec_timeout: int = 60, modal_app: str = "boopang-factory", modal_cpu: float = 1.0, modal_memory: int = 1024):
         self.root = Path(root).resolve()
         self.limits = limits or Limits()
         self.exec_mode, self.sandbox_image, self.exec_timeout = exec_mode, sandbox_image, exec_timeout
-        if exec_mode not in ("off", "docker", "local"):
-            raise WorkspaceError("exec_mode 는 off, docker, local 중 하나여야 합니다")
+        self.modal_app, self.modal_cpu, self.modal_memory = modal_app, modal_cpu, modal_memory
+        if exec_mode not in ("off", "docker", "modal", "local"):
+            raise WorkspaceError("exec_mode 는 off, docker, modal, local 중 하나여야 합니다")
         self.root.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------ 경로
@@ -197,9 +199,21 @@ class Workspace:
         pytest_args = ["-q", "-p", "no:cacheprovider", *[a for a in args if a != "-q"]]
         if self.exec_mode == "local":
             return {**base, **self._exec([sys.executable, "-m", "pytest", *pytest_args], self.exec_timeout, limited=True)}
+        if self.exec_mode == "modal":
+            return {**base, **self._run_modal(pytest_args)}
         return {**base, **self._run_docker(pytest_args)}
 
     # ------------------------------------------------------------ 실행기
+    def _run_modal(self, pytest_args: list[str]) -> dict:
+        files = {rel: p.read_bytes() for rel, p in self._files()}  # 허용된 파일만 (실행 산출물·캐시 제외)
+        try:
+            out = modal_runner.run_pytest(files, pytest_args, app_name=self.modal_app, timeout=self.exec_timeout, cpu=self.modal_cpu,
+                                          memory=self.modal_memory, packages=SANDBOX_PACKAGES)
+        except modal_runner.ModalError as exc:
+            raise WorkspaceError(str(exc)) from exc
+        out["stdout"], out["stderr"] = _tail(out["stdout"]), _tail(out["stderr"])
+        return out
+
     def _env(self) -> dict:
         # 서버 환경변수(API 키 등)는 절대 넘기지 않는다
         return {"PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"), "HOME": str(self.root), "LANG": "C.UTF-8",
@@ -252,7 +266,21 @@ class Workspace:
 
 def from_config(root, cfg) -> Workspace:
     return Workspace(root, limits=Limits(cfg.factory_max_files + 3, cfg.factory_max_file_bytes, cfg.factory_max_total_bytes),
-                     exec_mode=cfg.factory_exec, sandbox_image=cfg.sandbox_image, exec_timeout=cfg.exec_timeout)
+                     exec_mode=cfg.factory_exec, sandbox_image=cfg.sandbox_image, exec_timeout=cfg.exec_timeout,
+                     modal_app=cfg.modal_app, modal_cpu=cfg.modal_cpu, modal_memory=cfg.modal_memory)
+
+
+def exec_readiness(cfg) -> tuple[bool, str]:
+    """선택한 실행 모드가 지금 사용 가능한지 (상태 화면 안내용, 네트워크 호출 없음)."""
+    mode = cfg.factory_exec
+    if mode == "modal":
+        if not modal_runner.sdk_available():
+            return False, "modal 패키지가 필요합니다 (pip install modal)"
+        if not modal_runner.credentials_available():
+            return False, "Modal 자격 증명이 없습니다 (`modal token set` 또는 MODAL_TOKEN_ID/MODAL_TOKEN_SECRET)"
+    elif mode == "docker" and not shutil.which("docker"):
+        return False, "docker 실행 파일을 찾을 수 없습니다"
+    return True, ""
 
 
 def to_json(obj) -> str:

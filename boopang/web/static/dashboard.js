@@ -317,7 +317,7 @@
   async function loadFactoryStatus() {
     try { factory = await (await fetch("/api/factory/status")).json(); } catch (_) { factory = {mode: "disabled", hint: "상태를 확인할 수 없습니다."}; }
     const s = $("factory-status");
-    const exec = {off: "테스트 실행 안 함(정적 점검만)", docker: "테스트는 네트워크 차단 Docker 샌드박스에서 실행", local: "⚠ 테스트를 이 서버에서 격리 없이 실행(local)"}[factory.exec] || "";
+    const exec = {off: "테스트 실행 안 함(정적 점검만)", docker: "테스트는 네트워크 차단 Docker 샌드박스에서 실행", modal: "테스트는 Modal 클라우드 샌드박스에서 실행(요금 발생 가능)", local: "⚠ 테스트를 이 서버에서 격리 없이 실행(local)"}[factory.exec] || "";
     const mcp = factory.mcp ? "MCP 경유 파일 기록" : "MCP 미사용";
     let text;
     if (factory.mode === "llm" && factory.provider === "ollama") text = `✅ 로컬 Ollama(${factory.model}) — 비용 0원, 데이터가 PC 밖으로 나가지 않습니다. 작은 모델은 느리고 품질이 낮을 수 있습니다.`;
@@ -325,7 +325,8 @@
     else if (factory.mode === "demo") text = `⚠ ${factory.hint}`;
     else text = `⛔ ${factory.hint}`;
     s.textContent = ["llm", "demo"].includes(factory.mode) ? `${text} · ${mcp} · ${exec}` : text;
-    s.className = "factory-status " + (factory.mode === "llm" && factory.exec !== "local" ? "ok" : "warn");
+    if (["llm", "demo"].includes(factory.mode) && factory.exec_ready === false) s.textContent += ` · ⛔ ${factory.exec_hint}`;
+    s.className = "factory-status " + (factory.mode === "llm" && factory.exec !== "local" && factory.exec_ready !== false ? "ok" : "warn");
   }
 
   async function submit(e) {

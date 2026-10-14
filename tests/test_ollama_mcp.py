@@ -57,7 +57,8 @@ def test_ollama_request_shape_and_usage():
     assert seen["url"] == "http://ollama.test:11434/api/chat"
     assert b["model"] == "qwen2.5-coder:7b-instruct" and b["stream"] is False and b["format"] == schema
     assert b["messages"] == [{"role": "system", "content": "SYS"}, {"role": "user", "content": "USER"}]
-    assert b["options"]["temperature"] == 0.2 and b["options"]["num_ctx"] == 8192 and b["options"]["num_predict"] == 16000
+    assert b["options"]["temperature"] == 0.2 and b["options"]["num_ctx"] == 8192
+    assert b["options"]["num_predict"] == 4096 and b["keep_alive"] == "15m"   # 출력 상한은 컨텍스트의 절반으로 제한
     assert (llm.calls, llm.input_tokens, llm.output_tokens) == (1, 12, 5)
 
 
@@ -345,6 +346,7 @@ def test_mcp_can_be_disabled(client, monkeypatch):
 class FakeOllama:
     def __init__(self, models=("qwen2.5-coder:7b-instruct",)):
         self.requests, self.models = [], list(models)
+        self.plan, self.hits = {}, {}   # 결함 주입: {시스템 프롬프트 키워드: [처음 N번의 깨진 응답]}
         api = FastAPI()
 
         @api.get("/api/tags")
@@ -355,7 +357,12 @@ class FakeOllama:
         async def chat(req: Request):
             body = await req.json()
             self.requests.append(body)
-            sys_, user = body["messages"][0]["content"], body["messages"][-1]["content"]
+            sys_, user = body["messages"][0]["content"], body["messages"][1]["content"]  # 재시도 시 마지막은 교정 문구
+            key = next((k for k in self.plan if k in sys_), None)
+            if key and self.hits.get(key, 0) < len(self.plan[key]):
+                self.hits[key] = self.hits.get(key, 0) + 1
+                return {"message": {"role": "assistant", "content": self.plan[key][self.hits[key] - 1]}, "done_reason": "stop",
+                        "prompt_eval_count": 50, "eval_count": 5}
             if "senior product manager" in sys_:
                 out = demo.PRD
             elif "software architect" in sys_:

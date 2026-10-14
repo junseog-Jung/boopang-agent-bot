@@ -17,6 +17,7 @@ from ..pipeline import process
 from ..schema import SchemaError, load_schema
 from ..sample import sample_xlsx
 from ..factory.pipeline import make_llm, run_software_job
+from ..factory.workspace_tools import exec_readiness
 from ..llm_client import ollama_status
 from .jobs import AGENTS, SOFTWARE_ROLES, JobLimitError, JobManager, run_job
 
@@ -164,8 +165,9 @@ def api_factory_status():
         model = cfg.llm_model
         has_cred = bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN"))
         mode, hint = ("llm", "") if has_cred else ("unconfigured", "ANTHROPIC_API_KEY 환경변수가 필요합니다.")
+    exec_ok, exec_hint = exec_readiness(cfg)
     return {"mode": mode, "provider": provider, "model": model, "cost": cost, "hint": hint,
-            "exec": cfg.factory_exec, "mcp": cfg.factory_mcp,
+            "exec": cfg.factory_exec, "exec_ready": exec_ok, "exec_hint": exec_hint, "mcp": cfg.factory_mcp,
             "limits": {"max_files": cfg.factory_max_files, "max_calls": cfg.factory_max_calls,
                        "max_jobs_per_hour": cfg.factory_max_jobs_per_hour}}
 
