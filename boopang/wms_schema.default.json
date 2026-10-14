@@ -1,0 +1,40 @@
+{
+  "schema_version": "1.0",
+  "csv": {"delimiter": ",", "encoding": "utf-8-sig"},
+  "date_format": "%Y-%m-%d",
+  "status_codes": {
+    "READY": "READY", "SHIPPING": "SHIPPING", "DELIVERED": "DELIVERED", "PARTIAL": "PARTIAL",
+    "BACKORDER": "BACKORDER", "INSPECT_PENDING": "INSPECT_PENDING", "HOLD": "HOLD",
+    "CANCELLED": "CANCELLED", "RETURNED": "RETURNED"
+  },
+  "line_columns": [
+    {"column": "ORDER_NO", "source": "order_id"},
+    {"column": "LINE_NO", "source": "line_no"},
+    {"column": "SKU", "source": "sku"},
+    {"column": "ITEM_NAME", "source": "name"},
+    {"column": "ORD_QTY", "source": "qty_ordered"},
+    {"column": "RCV_QTY", "source": "qty_received"},
+    {"column": "UNIT_PRICE", "source": "unit_price"},
+    {"column": "DISC_RATE", "source": "discount_pct"},
+    {"column": "SUPPLY_AMT", "source": "supply_amt"},
+    {"column": "VAT_AMT", "source": "vat_amt"},
+    {"column": "TOTAL_AMT", "source": "total_amt"},
+    {"column": "STATUS_CD", "source": "status"},
+    {"column": "RECIPIENT", "source": "recipient"},
+    {"column": "TEL", "source": "phone"},
+    {"column": "ADDR", "source": "address"},
+    {"column": "SHIP_DT", "source": "ship_date"},
+    {"column": "TRACKING_NO", "source": "tracking_no"},
+    {"column": "ISSUE_CNT", "source": "issue_count"}
+  ],
+  "order_columns": [
+    {"column": "ORDER_NO", "source": "order_id"},
+    {"column": "STATUS_CD", "source": "status"},
+    {"column": "STATUS_LABEL", "source": "status_label"},
+    {"column": "LINE_CNT", "source": "line_count"},
+    {"column": "SUPPLY_AMT", "source": "supply_amt"},
+    {"column": "VAT_AMT", "source": "vat_amt"},
+    {"column": "SHIPPING_FEE", "source": "shipping_fee"},
+    {"column": "TOTAL_AMT", "source": "total_amt"}
+  ]
+}

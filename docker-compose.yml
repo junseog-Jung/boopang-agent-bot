@@ -1,0 +1,58 @@
+# 실행: docker compose up --build -d   →   http://localhost:${HTTP_PORT:-80}
+# 상태: docker compose ps   (app / nginx 모두 healthy 여야 함)
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile
+    environment:
+      BOOPANG_VAT_ENABLED: "true"
+      BOOPANG_PRICE_INCLUDES_VAT: "false"
+      BOOPANG_BILL_BASIS: "received"          # received | ordered
+      BOOPANG_FREE_SHIPPING_THRESHOLD: "50000"
+      BOOPANG_SHIPPING_FEE: "3000"
+      # 실제 WMS 스키마를 쓰려면 아래 두 줄과 volumes 의 주석을 함께 해제
+      # BOOPANG_SCHEMA_FILE: /config/schema_config.json
+    # volumes:
+    #   - ./schema_config.json:/config/schema_config.json:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8899/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
+    logging: *logging
+    expose:
+      - "8899"
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+    restart: unless-stopped
+    logging: *logging

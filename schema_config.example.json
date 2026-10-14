@@ -1,0 +1,25 @@
+{
+  "schema_version": "2.0-boopang",
+  "csv": {"delimiter": ",", "encoding": "cp949"},
+  "date_format": "%Y%m%d",
+  "status_codes": {
+    "READY": "10", "PARTIAL": "15", "BACKORDER": "17", "INSPECT_PENDING": "05",
+    "SHIPPING": "20", "DELIVERED": "30", "HOLD": "90", "CANCELLED": "98", "RETURNED": "99"
+  },
+  "line_columns": [
+    {"column": "WH_CD", "value": "BP01"},
+    {"column": "ORD_NO", "source": "order_id"},
+    {"column": "ITEM_CD", "source": "sku"},
+    {"column": "ITEM_NM", "source": "name"},
+    {"column": "QTY", "source": "qty_received"},
+    {"column": "AMT", "source": "total_amt"},
+    {"column": "STS", "source": "status"},
+    {"column": "OUT_DT", "source": "ship_date"},
+    {"column": "WAYBILL", "source": "tracking_no"}
+  ],
+  "order_columns": [
+    {"column": "ORD_NO", "source": "order_id"},
+    {"column": "STS", "source": "status"},
+    {"column": "TOT_AMT", "source": "total_amt"}
+  ]
+}

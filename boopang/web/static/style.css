@@ -1,0 +1,27 @@
+:root{--bg:#f6f7fb;--fg:#1f2937;--muted:#6b7280;--main:#4f46e5;--card:#fff;--line:#e5e7eb;--err:#dc2626;--warn:#d97706;--info:#2563eb;--ok:#16a34a}
+@media (prefers-color-scheme:dark){:root{--bg:#111827;--fg:#f3f4f6;--muted:#9ca3af;--card:#1f2937;--line:#374151}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 -apple-system,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px;background:var(--main);color:#fff;flex-wrap:wrap}
+header h1{margin:0;font-size:18px}header a{color:#fff}
+main{max-width:1100px;margin:0 auto;padding:16px}
+#drop{border:2px dashed var(--main);border-radius:12px;padding:32px 16px;text-align:center;background:var(--card);cursor:pointer}
+#drop.over,#drop:focus{background:rgba(79,70,229,.08);outline:none}
+.muted{color:var(--muted)}#msg{min-height:20px}#msg.error{color:var(--err)}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:12px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px}
+.card b{display:block;font-size:20px}.card span{color:var(--muted);font-size:12px}
+.badges{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+.badge{padding:3px 10px;border-radius:999px;font-size:12px;font-weight:600;border:1px solid currentColor}
+.s-READY,.s-DELIVERED{color:var(--ok)}.s-SHIPPING,.s-INSPECT_PENDING{color:var(--info)}
+.s-PARTIAL,.s-BACKORDER{color:var(--warn)}.s-HOLD{color:var(--err)}.s-CANCELLED,.s-RETURNED{color:var(--muted)}
+.sev-ERROR{color:var(--err);font-weight:700}.sev-WARN{color:var(--warn);font-weight:700}.sev-INFO{color:var(--info)}
+.export{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+button{background:var(--main);color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font:inherit}
+.tabs{display:flex;gap:6px;margin-top:8px}.tabs button{background:transparent;color:var(--fg);border:1px solid var(--line)}
+.tabs button.active{background:var(--main);color:#fff}
+.scroll{overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:10px;margin-top:8px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+td.num,th.num{text-align:right}
+@media (max-width:720px){.cards{grid-template-columns:repeat(2,1fr)}}
